@@ -42,8 +42,34 @@ router.get('/', async (req, res) => {
   }
 });
 
+// POST /api/products - Create a new product (Sellers only)
+router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
+  const { NAME, DESCRIPTION, PRICE, STOCK } = req.body;
+  const sellerId = req.user.id; // Get seller ID from req.user
+
+  // Validate input
+  if (!NAME || !DESCRIPTION || !PRICE || !STOCK) {
+    return res.status(400).json({ message: 'All fields are required' });
+  }
+
+  try {
+    const productId = uuidv4(); // Generate a unique ID for the product
+
+    // Insert the new product into the database
+    await db.execute({
+      sqlText: `INSERT INTO PRODUCTS (PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID) VALUES (?, ?, ?, ?, ?, ?)`,
+      binds: [productId, NAME, DESCRIPTION, PRICE, STOCK, sellerId],
+    });
+
+    res.status(201).json({ message: 'Product created successfully' });
+  } catch (error) {
+    console.error('Error creating product:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // Update a product (Exporters only)
-router.put('/:productId', authMiddleware, authorize(['exporter']), async (req, res) => {
+router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res) => {
   const { productId } = req.params;
   const { name, description, category, price, quantity } = req.body;
   const sellerId = req.user.id;

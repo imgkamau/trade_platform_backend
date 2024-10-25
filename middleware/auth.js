@@ -11,24 +11,24 @@ const authMiddleware = (req, res, next) => {
   }
 
   // Expected format: "Bearer TOKEN"
-  const tokenParts = authHeader.split(' ');
+  const [bearer, token] = authHeader.split(' ');
 
-  if (tokenParts.length !== 2 || tokenParts[0] !== 'Bearer') {
+  if (bearer !== 'Bearer' || !token) {
     return res.status(401).json({ message: 'Token format is invalid' });
   }
 
-  const token = tokenParts[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'Token missing, authorization denied' });
+  if (!process.env.JWT_SECRET) {
+    console.error('JWT_SECRET is not set in the environment variables');
+    return res.status(500).json({ message: 'Internal server error' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded.user; // Attach the user payload to the request
+    console.log('User decoded from token:', JSON.stringify(req.user, null, 2)); // Pretty print for better readability
     next();
   } catch (error) {
-    console.error('Token verification error:', error);
+    console.error('Token verification error:', error.name, error.message);
     res.status(401).json({ message: 'Token is not valid' });
   }
 };
