@@ -12,6 +12,8 @@ const messagesRouter = require('./routes/messages');
 const ordersRouter = require('./routes/orders');
 const authMiddleware = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
+const regulationsRouter = require('./routes/regulations');
+
 
 // Load environment variables from .env file
 dotenv.config();
@@ -22,6 +24,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(refreshTokenRoute);
+
+// Use the regulations routes
+app.use('/api/regulations', regulationsRouter);
 // Setup Morgan to use Winston's stream
 app.use(
   morgan('combined', {
