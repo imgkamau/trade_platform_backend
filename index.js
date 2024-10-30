@@ -13,7 +13,9 @@ const ordersRouter = require('./routes/orders');
 const authMiddleware = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 const regulationsRouter = require('./routes/regulations');
-
+const logisticsRouter = require('./routes/logistics');
+const documentsRouter = require('./routes/documents');
+const shippingRouter = require('./routes/shipping');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -27,6 +29,10 @@ app.use(refreshTokenRoute);
 
 // Use the regulations routes
 app.use('/api/regulations', regulationsRouter);
+
+app.use('/api/logistics', logisticsRouter);
+app.use('/api/documents', documentsRouter);
+app.use('/api/shipping', shippingRouter);
 // Setup Morgan to use Winston's stream
 app.use(
   morgan('combined', {
