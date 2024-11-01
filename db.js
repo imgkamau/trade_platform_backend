@@ -46,12 +46,6 @@ const connectToSnowflake = () => {
         const SNOWFLAKE_SCHEMA = getEnvVariable('SNOWFLAKE_SCHEMA');
         const SNOWFLAKE_ROLE = process.env.SNOWFLAKE_ROLE ? process.env.SNOWFLAKE_ROLE.trim() : undefined;
 
-        // Log the environment variables to ensure they are loaded correctly
-        console.log('SNOWFLAKE_ACCOUNT:', JSON.stringify(SNOWFLAKE_ACCOUNT));
-        console.log('SNOWFLAKE_WAREHOUSE:', JSON.stringify(SNOWFLAKE_WAREHOUSE));
-        console.log('SNOWFLAKE_DATABASE:', JSON.stringify(SNOWFLAKE_DATABASE));
-        console.log('SNOWFLAKE_SCHEMA:', JSON.stringify(SNOWFLAKE_SCHEMA));
-
         // Create a connection using environment variables
         connection = snowflake.createConnection({
           account: SNOWFLAKE_ACCOUNT,
@@ -81,6 +75,10 @@ const connectToSnowflake = () => {
               // Execute USE SCHEMA
               await executeSql(conn, `USE SCHEMA ${SNOWFLAKE_SCHEMA}`);
               console.log(`Using schema: ${SNOWFLAKE_SCHEMA}`);
+
+              // Set the BINARY_OUTPUT_FORMAT to HEX
+              await executeSql(conn, "ALTER SESSION SET BINARY_OUTPUT_FORMAT = 'HEX'");
+              console.log('BINARY_OUTPUT_FORMAT set to HEX');
 
               resolve(connection);
             } catch (error) {
