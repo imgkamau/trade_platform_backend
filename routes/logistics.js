@@ -43,5 +43,30 @@ router.get('/shipments', authMiddleware, authorize(['seller']), async (req, res)
 });
 
 // Additional routes can be added for tracking, document management, etc.
-
+// Modify existing shipment status
+router.put('/shipments/:id', async (req, res) => {
+    const shipmentId = req.params.id;
+    const { status } = req.body;
+  
+    try {
+      const result = await db.execute({
+        sqlText: `
+          UPDATE trade.gwtrade.Shipments
+          SET status = ?
+          WHERE shipment_id = ?
+        `,
+        binds: [status, shipmentId]
+      });
+  
+      if (result.rowCount === 0) {
+        return res.status(404).json({ message: 'Shipment not found' });
+      }
+  
+      res.status(200).json({ message: 'Shipment status updated successfully' });
+    } catch (error) {
+      console.error('Error updating shipment status:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+  
 module.exports = router;

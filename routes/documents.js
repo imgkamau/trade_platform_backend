@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require('express'); 
 const router = express.Router();
 const multer = require('multer');
 const db = require('../db');
@@ -36,6 +36,9 @@ router.post('/upload', authMiddleware, authorize(['seller', 'buyer']), upload.si
       bufferLength: document.buffer.length
     });
 
+    // Convert the buffer to a hex string
+    const hexString = document.buffer.toString('hex');
+
     // Save the document to the database
     await db.execute({
       sqlText: `
@@ -47,19 +50,12 @@ router.post('/upload', authMiddleware, authorize(['seller', 'buyer']), upload.si
           FILE_DATA
         ) VALUES (?, ?, ?, ?, ?)
       `,
-      // binds: [
-      //   documentId,
-      //   shipmentId,
-      //   documentType,
-      //   filePath,
-      //   document.buffer // Store as binary data
-      // ]
       binds: [
         documentId,
         shipmentId,
         documentType,
         filePath,
-        hexString // use the hex string instead of the buffer
+        hexString // Use the hex string instead of the buffer
       ]
     });
 
@@ -125,18 +121,21 @@ router.get('/:documentId', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Document not found' });
     }
 
-    const fileData = document.FILE_DATA;
+    const fileDataHex = document.FILE_DATA;
 
-    if (!fileData) {
+    if (!fileDataHex) {
       return res.status(404).json({ message: 'Document data not found' });
     }
+
+    // Convert hex string back to buffer
+    const fileDataBuffer = Buffer.from(fileDataHex, 'hex');
 
     // Set appropriate headers for file download
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${document.FILE_PATH.split('/').pop()}"`);
 
     // Send the file data
-    res.send(fileData);
+    res.send(fileDataBuffer);
   } catch (error) {
     console.error('Error downloading document:', error);
     res.status(500).json({

@@ -5,6 +5,7 @@ const router = express.Router();
 const db = require('../db');
 const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
+const Order = require('../models/Order'); // Import the correct Order model
 
 // Place a new order (Buyers only)
 router.post('/', authMiddleware, async (req, res) => {
@@ -49,9 +50,8 @@ router.post('/', authMiddleware, async (req, res) => {
       const itemTotal = product.PRICE * quantity;
       totalAmount += itemTotal;
 
-      // Reduce product quantity
       await db.execute({
-        sqlText: `UPDATE PRODUCTS SET QUANTITY = QUANTITY - ? WHERE PRODUCT_ID = ?`,
+        sqlText: `UPDATE PRODUCTS SET STOCK = STOCK - ? WHERE PRODUCT_ID = ?`,
         binds: [quantity, productId],
       });
 
@@ -88,6 +88,16 @@ router.post('/', authMiddleware, async (req, res) => {
     // Rollback transaction
     await db.execute({ sqlText: 'ROLLBACK', binds: [] });
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// GET all orders
+router.get('/', async (req, res) => {
+  try {
+    const orders = await Order.find(); // This will now fetch orders from the correct model
+    res.status(200).json(orders);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 
