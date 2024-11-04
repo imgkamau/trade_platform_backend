@@ -3,6 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { v4: uuidv4 } = require('uuid'); // Import uuid for generating unique IDs if needed
 
 // Get all regulations
 router.get('/', async (req, res) => {
@@ -34,6 +35,60 @@ router.post('/', async (req, res) => {
     res.status(201).json({ message: 'Regulation added successfully' });
   } catch (error) {
     console.error('Error adding regulation:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Update an existing regulation
+router.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const { title, description, link, category } = req.body;
+
+  // Validate that at least one field is provided to update
+  if (!title && !description && !link && !category) {
+    return res.status(400).json({ message: 'At least one field must be provided to update' });
+  }
+
+  // Build the update query dynamically
+  const updates = [];
+  const binds = [];
+
+  if (title) {
+    updates.push(`Title = ?`);
+    binds.push(title);
+  }
+  if (description) {
+    updates.push(`Description = ?`);
+    binds.push(description);
+  }
+  if (link) {
+    updates.push(`Link = ?`);
+    binds.push(link);
+  }
+  if (category) {
+    updates.push(`Category = ?`);
+    binds.push(category);
+  }
+
+  // Add the ID to the binds
+  binds.push(id);
+
+  // Construct the SQL query
+  const sql = `UPDATE trade.gwtrade.Regulations SET ${updates.join(', ')}, Date_Updated = CURRENT_TIMESTAMP WHERE ID = ?`;
+
+  try {
+    const result = await db.execute({
+      sqlText: sql,
+      binds: binds,
+    });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Regulation not found' });
+    }
+
+    res.json({ message: 'Regulation updated successfully' });
+  } catch (error) {
+    console.error('Error updating regulation:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

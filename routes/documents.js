@@ -75,7 +75,8 @@ router.post('/upload', authMiddleware, authorize(['seller', 'buyer']), upload.si
 });
 
 // GET: Fetch documents
-router.get('/', authMiddleware, async (req, res) => {
+//router.get('/', authMiddleware, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const documents = await db.execute({
       sqlText: `
@@ -101,7 +102,8 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // GET: Download a specific document
-router.get('/:documentId', authMiddleware, async (req, res) => {
+//router.get('/:documentId', authMiddleware, async (req, res) => {
+  router.get('/:documentId', async (req, res) => {
   const { documentId } = req.params;
 
   try {
