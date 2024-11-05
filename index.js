@@ -17,6 +17,7 @@ const logisticsRouter = require('./routes/logistics');
 const documentsRouter = require('./routes/documents');
 const shippingRouter = require('./routes/shipping');
 const checklistsRouter = require('./routes/checklists');
+const quotesRoutes = require('./routes/quotes'); 
 // Load environment variables from .env file
 dotenv.config();
 
@@ -44,11 +45,12 @@ app.use(
 
 // Public Routes
 app.use('/api/auth', authRouter);
-app.use('/api/products', productsRouter); // Re-enable authMiddleware after testing
+app.use('/api/products', productsRouter);
 app.use('/api/checklists', checklistsRouter);
+app.use('/api/quotes', quotesRoutes);
 
 // Protected Routes
-//pp.use('/api/products', authMiddleware, productsRouter); // Re-enable authMiddleware after testing
+//app.use('/api/products', authMiddleware, productsRouter); // Re-enable authMiddleware after testing
 app.use('/api/messages', authMiddleware, messagesRouter);
 app.use('/api/orders', authMiddleware, ordersRouter);
 
