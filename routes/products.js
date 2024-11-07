@@ -44,11 +44,11 @@ router.get('/', async (req, res) => {
 
 // POST /api/products - Create a new product (Sellers only)
 router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
-  const { NAME, DESCRIPTION, PRICE, STOCK } = req.body;
+  const { NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID } = req.body;
   const sellerId = req.user.id; // Get seller ID from req.user
 
   // Validate input
-  if (!NAME || !DESCRIPTION || !PRICE || !STOCK) {
+  if (!NAME || !DESCRIPTION || !PRICE || !STOCK || !SELLER_ID) {
     return res.status(400).json({ message: 'All fields are required' });
   }
 

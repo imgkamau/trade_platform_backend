@@ -8,30 +8,35 @@ const authMiddleware = require('../middleware/auth');
 
 // POST /api/quotes - Request a new quote
 router.post('/', authMiddleware, async (req, res) => {
-    const { productId, quantity, sellerId } = req.body; // Include sellerId in the request
-    const buyerId = req.user.id; // Assuming the user ID is stored in the request
-
-    // Validate input
-    if (!productId || !quantity || !sellerId) {
-        return res.status(400).json({ message: 'Product ID, quantity, and seller ID are required' });
-    }
-
     try {
-        const quoteId = uuidv4(); // Generate a unique ID for the quote
+        const { productId, quantity } = req.body;
+        const buyerId = req.user.id; // Assuming the user ID is stored in the request
 
-        // Insert the quote request into the database
-        await db.execute({
-            sqlText: `INSERT INTO QUOTES (QUOTE_ID, PRODUCT_ID, BUYER_ID, QUANTITY, SELLER_ID, STATUS) VALUES (?, ?, ?, ?, ?, ?)`,
-            binds: [quoteId, productId, buyerId, quantity, sellerId, 'Pending'],
-        });
+        // Fetch the product details including the seller_ID
+        const productResult = await db.execute('SELECT * FROM PRODUCTS WHERE PRODUCT_ID = ?', [productId]);
 
-        // Trigger a notification to the seller
+        if (!productResult || productResult.length === 0) {
+            return res.status(404).json({ message: 'Product not found' });
+        }
+
+        const sellerId = productResult[0].SELLER_ID;
+
+        // Generate a new quote ID
+        const quoteId = uuidv4();
+
+        // Insert the new quote into the database
+        await db.execute(
+            'INSERT INTO QUOTES (QUOTE_ID, PRODUCT_ID, BUYER_ID, SELLER_ID, QUANTITY, STATUS) VALUES (?, ?, ?, ?, ?, ?)',
+            [quoteId, productId, buyerId, sellerId, quantity, 'Pending']
+        );
+
+        // Send notification to the seller (implement this function based on your notification system)
         await notifySeller(sellerId, quoteId);
 
-        res.status(201).json({ message: 'Quote requested successfully', quoteId: quoteId });
+        res.status(201).json({ message: 'Quote requested successfully', quoteId });
     } catch (error) {
-        console.error('Error requesting quote:', error);
-        res.status(500).json({ message: 'Server error', error: error.message });
+        console.error('Error creating quote:', error);
+        res.status(500).json({ message: 'An error occurred while creating the quote' });
     }
 });
 
