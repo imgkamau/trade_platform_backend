@@ -1,5 +1,3 @@
-// trade-platform-backend/index.js
-
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -18,22 +16,26 @@ const documentsRouter = require('./routes/documents');
 const shippingRouter = require('./routes/shipping');
 const checklistsRouter = require('./routes/checklists');
 const quotesRoutes = require('./routes/quotes'); 
+
 // Load environment variables from .env file
 dotenv.config();
 
 const app = express();
 
+// CORS configuration
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 204
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(refreshTokenRoute);
 
-// Use the regulations routes
-app.use('/api/regulations', regulationsRouter);
-
-app.use('/api/logistics', logisticsRouter);
-app.use('/api/documents', documentsRouter);
-app.use('/api/shipping', shippingRouter);
 // Setup Morgan to use Winston's stream
 app.use(
   morgan('combined', {
@@ -48,9 +50,12 @@ app.use('/api/auth', authRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/checklists', checklistsRouter);
 app.use('/api/quotes', quotesRoutes);
+app.use('/api/regulations', regulationsRouter);
+app.use('/api/logistics', logisticsRouter);
+app.use('/api/documents', documentsRouter);
+app.use('/api/shipping', shippingRouter);
 
 // Protected Routes
-//app.use('/api/products', authMiddleware, productsRouter); // Re-enable authMiddleware after testing
 app.use('/api/messages', authMiddleware, messagesRouter);
 app.use('/api/orders', authMiddleware, ordersRouter);
 
@@ -75,10 +80,13 @@ app.use(errorHandler);
 // Start the server
 const PORT = process.env.PORT || 5000;
 try {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     logger.info(`Server running on port ${PORT}`);
   });
 } catch (error) {
   logger.error(`Failed to start server: ${error.message}`);
   process.exit(1);
 }
+
+// For testing purposes
+module.exports = app;
