@@ -15,7 +15,7 @@ const logisticsRouter = require('./routes/logistics');
 const documentsRouter = require('./routes/documents');
 const shippingRouter = require('./routes/shipping');
 const checklistsRouter = require('./routes/checklists');
-const quotesRoutes = require('./routes/quotes'); 
+const quotesRoutes = require('./routes/quotes');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -24,12 +24,18 @@ const app = express();
 
 // CORS configuration
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 204,
 };
+
+// Check for the production environment and use the correct frontend URL
+if (process.env.NODE_ENV === 'production') {
+  corsOptions.origin = process.env.FRONTEND_URL || 'https://kenya-eu-trade-platform.vercel.app'; // Vercel frontend URL
+} else {
+  corsOptions.origin = process.env.FRONTEND_URL || 'http://localhost:3000'; // Localhost frontend URL
+}
 
 // Middleware
 app.use(cors(corsOptions));
