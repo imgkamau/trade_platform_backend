@@ -57,10 +57,12 @@ app.use('/api/regulations', regulationsRouter);
 app.use('/api/logistics', logisticsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/shipping', shippingRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/messages', messagesRouter);
 
 // Protected Routes (requiring authentication)
-app.use('/api/messages', authMiddleware, messagesRouter);
-app.use('/api/orders', authMiddleware, ordersRouter);
+//app.use('/api/messages', authMiddleware, messagesRouter);
+//app.use('/api/orders', authMiddleware, ordersRouter);
 
 // Root Route
 app.get('/', (req, res) => {
