@@ -24,32 +24,29 @@ const app = express();
 
 // CORS configuration
 const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? process.env.FRONTEND_URL || 'https://kenya-eu-trade-platform.vercel.app'
+    : process.env.FRONTEND_URL || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   optionsSuccessStatus: 204,
 };
 
-// Check for the production environment and use the correct frontend URL
-if (process.env.NODE_ENV === 'production') {
-  corsOptions.origin = process.env.FRONTEND_URL || 'https://kenya-eu-trade-platform.vercel.app'; // Vercel frontend URL
-} else {
-  corsOptions.origin = process.env.FRONTEND_URL || 'http://localhost:3000'; // Localhost frontend URL
-}
-
-// Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
-app.use(refreshTokenRoute);
 
 // Setup Morgan to use Winston's stream
 app.use(
   morgan('combined', {
     stream: {
-      write: (message) => logger.info(message.trim()), // Trim to remove trailing newline
+      write: (message) => logger.info(message.trim()),
     },
   })
 );
+
+// Refresh Token Route (assumed public)
+app.use(refreshTokenRoute);
 
 // Public Routes
 app.use('/api/auth', authRouter);
@@ -61,7 +58,7 @@ app.use('/api/logistics', logisticsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/shipping', shippingRouter);
 
-// Protected Routes
+// Protected Routes (requiring authentication)
 app.use('/api/messages', authMiddleware, messagesRouter);
 app.use('/api/orders', authMiddleware, ordersRouter);
 
@@ -80,7 +77,7 @@ app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// Error Handling Middleware (Must be after all other app.use() and routes)
+// Error Handling Middleware (Should be after all other routes)
 app.use(errorHandler);
 
 // Start the server
