@@ -69,9 +69,10 @@ router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
 });
 
 // Update a product (Exporters only)
+// Update a product (Sellers only)
 router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res) => {
   const { productId } = req.params;
-  const { name, description, category, price, quantity } = req.body;
+  const { name, description, category, price, stock } = req.body;
   const sellerId = req.user.id;
 
   try {
@@ -85,6 +86,9 @@ router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res
       return res.status(404).json({ message: 'Product not found or access denied' });
     }
 
+    // Replace undefined with null in binds array
+    const binds = [name ?? null, description ?? null, category ?? null, price ?? null, stock ?? null, productId];
+
     // Update the product
     await db.execute({
       sqlText: `UPDATE PRODUCTS SET
@@ -92,10 +96,10 @@ router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res
         DESCRIPTION = COALESCE(?, DESCRIPTION),
         CATEGORY = COALESCE(?, CATEGORY),
         PRICE = COALESCE(?, PRICE),
-        QUANTITY = COALESCE(?, QUANTITY),
+        STOCK = COALESCE(?, STOCK),
         UPDATED_AT = CURRENT_TIMESTAMP
         WHERE PRODUCT_ID = ?`,
-      binds: [name, description, category, price, quantity, productId],
+      binds: binds,
     });
 
     res.json({ message: 'Product updated successfully' });
