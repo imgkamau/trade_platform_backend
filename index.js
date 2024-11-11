@@ -1,3 +1,5 @@
+// index.js
+
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -16,6 +18,8 @@ const documentsRouter = require('./routes/documents');
 const shippingRouter = require('./routes/shipping');
 const checklistsRouter = require('./routes/checklists');
 const quotesRoutes = require('./routes/quotes');
+const analyticsRouter = require('./routes/analytics');
+const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 
 // Load environment variables from .env file
 dotenv.config();
@@ -24,9 +28,10 @@ const app = express();
 
 // CORS configuration
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production'
-    ? process.env.FRONTEND_URL || 'https://kenya-eu-trade-platform.vercel.app'
-    : process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin:
+    process.env.NODE_ENV === 'production'
+      ? process.env.FRONTEND_URL || 'https://kenya-eu-trade-platform.vercel.app'
+      : process.env.FRONTEND_URL || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -59,11 +64,7 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/shipping', shippingRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/messages', messagesRouter);
-
-// Protected Routes (requiring authentication)
-//app.use('/api/messages', authMiddleware, messagesRouter);
-//app.use('/api/orders', authMiddleware, ordersRouter);
-
+app.use('/api/analytics', analyticsRouter);
 // Root Route
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');
@@ -82,16 +83,19 @@ app.use('*', (req, res) => {
 // Error Handling Middleware (Should be after all other routes)
 app.use(errorHandler);
 
-// Start the server
+// Start the server after establishing database connection
 const PORT = process.env.PORT || 5000;
-try {
-  app.listen(PORT, '0.0.0.0', () => {
-    logger.info(`Server running on port ${PORT}`);
+
+connectToSnowflake()
+  .then(() => {
+    app.listen(PORT, '0.0.0.0', () => {
+      logger.info(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    logger.error(`Failed to connect to database: ${error.message}`);
+    process.exit(1);
   });
-} catch (error) {
-  logger.error(`Failed to start server: ${error.message}`);
-  process.exit(1);
-}
 
 // For testing purposes
 module.exports = app;

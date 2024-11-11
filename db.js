@@ -4,6 +4,7 @@ const snowflake = require('snowflake-sdk');
 require('dotenv').config({ path: '.env' });
 
 let connection;
+let connectionPromise; // To store the promise of the ongoing connection attempt
 
 // Helper function to get and validate environment variables
 const getEnvVariable = (varName) => {
@@ -32,94 +33,96 @@ const executeSql = (conn, sqlText) => {
 };
 
 const connectToSnowflake = () => {
-  return new Promise(async (resolve, reject) => {
-    if (connection) {
-      resolve(connection);
-    } else {
-      try {
-        // Get and validate environment variables
-        const SNOWFLAKE_ACCOUNT = getEnvVariable('SNOWFLAKE_ACCOUNT');
-        const SNOWFLAKE_USERNAME = getEnvVariable('SNOWFLAKE_USERNAME');
-        const SNOWFLAKE_PASSWORD = getEnvVariable('SNOWFLAKE_PASSWORD');
-        const SNOWFLAKE_WAREHOUSE = getEnvVariable('SNOWFLAKE_WAREHOUSE');
-        const SNOWFLAKE_DATABASE = getEnvVariable('SNOWFLAKE_DATABASE');
-        const SNOWFLAKE_SCHEMA = getEnvVariable('SNOWFLAKE_SCHEMA');
-        const SNOWFLAKE_ROLE = process.env.SNOWFLAKE_ROLE ? process.env.SNOWFLAKE_ROLE.trim() : undefined;
+  if (connection) {
+    return Promise.resolve(connection);
+  }
 
-        // Create a connection using environment variables
-        connection = snowflake.createConnection({
-          account: SNOWFLAKE_ACCOUNT,
-          username: SNOWFLAKE_USERNAME,
-          password: SNOWFLAKE_PASSWORD,
-          role: SNOWFLAKE_ROLE,
-          // Note: We're not setting warehouse, database, or schema here
-        });
+  if (connectionPromise) {
+    return connectionPromise;
+  }
 
-        // Connect to Snowflake
-        connection.connect(async (err, conn) => {
-          if (err) {
-            console.error('Unable to connect: ' + err.message);
-            reject(err);
-          } else {
-            console.log('Successfully connected to Snowflake.');
+  connectionPromise = new Promise(async (resolve, reject) => {
+    try {
+      // Get and validate environment variables
+      const SNOWFLAKE_ACCOUNT = getEnvVariable('SNOWFLAKE_ACCOUNT');
+      const SNOWFLAKE_USERNAME = getEnvVariable('SNOWFLAKE_USERNAME');
+      const SNOWFLAKE_PASSWORD = getEnvVariable('SNOWFLAKE_PASSWORD');
+      const SNOWFLAKE_WAREHOUSE = getEnvVariable('SNOWFLAKE_WAREHOUSE');
+      const SNOWFLAKE_DATABASE = getEnvVariable('SNOWFLAKE_DATABASE');
+      const SNOWFLAKE_SCHEMA = getEnvVariable('SNOWFLAKE_SCHEMA');
+      const SNOWFLAKE_ROLE = process.env.SNOWFLAKE_ROLE ? process.env.SNOWFLAKE_ROLE.trim() : undefined;
 
-            try {
-              // Execute USE WAREHOUSE
-              await executeSql(conn, `USE WAREHOUSE ${SNOWFLAKE_WAREHOUSE}`);
-              console.log(`Using warehouse: ${SNOWFLAKE_WAREHOUSE}`);
+      // Create a connection using environment variables
+      connection = snowflake.createConnection({
+        account: SNOWFLAKE_ACCOUNT,
+        username: SNOWFLAKE_USERNAME,
+        password: SNOWFLAKE_PASSWORD,
+        role: SNOWFLAKE_ROLE,
+        // Note: We're not setting warehouse, database, or schema here
+      });
 
-              // Execute USE DATABASE
-              await executeSql(conn, `USE DATABASE ${SNOWFLAKE_DATABASE}`);
-              console.log(`Using database: ${SNOWFLAKE_DATABASE}`);
+      // Connect to Snowflake
+      connection.connect(async (err, conn) => {
+        if (err) {
+          console.error('Unable to connect: ' + err.message);
+          reject(err);
+        } else {
+          console.log('Successfully connected to Snowflake.');
 
-              // Execute USE SCHEMA
-              await executeSql(conn, `USE SCHEMA ${SNOWFLAKE_SCHEMA}`);
-              console.log(`Using schema: ${SNOWFLAKE_SCHEMA}`);
+          try {
+            // Execute USE WAREHOUSE
+            await executeSql(conn, `USE WAREHOUSE ${SNOWFLAKE_WAREHOUSE}`);
+            console.log(`Using warehouse: ${SNOWFLAKE_WAREHOUSE}`);
 
-              // Set the BINARY_OUTPUT_FORMAT to HEX
-              await executeSql(conn, "ALTER SESSION SET BINARY_OUTPUT_FORMAT = 'HEX'");
-              console.log('BINARY_OUTPUT_FORMAT set to HEX');
+            // Execute USE DATABASE
+            await executeSql(conn, `USE DATABASE ${SNOWFLAKE_DATABASE}`);
+            console.log(`Using database: ${SNOWFLAKE_DATABASE}`);
 
-              resolve(connection);
-            } catch (error) {
-              console.error('Error setting session context:', error);
-              reject(error);
-            }
+            // Execute USE SCHEMA
+            await executeSql(conn, `USE SCHEMA ${SNOWFLAKE_SCHEMA}`);
+            console.log(`Using schema: ${SNOWFLAKE_SCHEMA}`);
+
+            // Set the BINARY_OUTPUT_FORMAT to HEX
+            await executeSql(conn, "ALTER SESSION SET BINARY_OUTPUT_FORMAT = 'HEX'");
+            console.log('BINARY_OUTPUT_FORMAT set to HEX');
+
+            resolve(connection);
+          } catch (error) {
+            console.error('Error setting session context:', error);
+            reject(error);
           }
-        });
-      } catch (error) {
-        console.error('Error setting up connection:', error);
-        reject(error);
-      }
+        }
+      });
+    } catch (error) {
+      console.error('Error setting up connection:', error);
+      reject(error);
     }
   });
+
+  return connectionPromise;
 };
 
 // Add the execute function
-const execute = async (options) => {
-  try {
-    // Ensure the connection is established
-    await connectToSnowflake();
-
-    return new Promise((resolve, reject) => {
-      connection.execute({
-        sqlText: options.sqlText,
-        binds: options.binds,
-        complete: function (err, stmt, rows) {
-          if (err) {
-            console.error(`Error executing query "${options.sqlText}":`, err);
-            reject(err);
-          } else {
-            resolve(rows);
-          }
-        },
-      });
-    });
-  } catch (err) {
-    console.error('Error getting Snowflake connection:', err);
-    throw err;
+const execute = (options) => {
+  if (!connection) {
+    throw new Error('Database connection is not established.');
   }
+
+  return new Promise((resolve, reject) => {
+    connection.execute({
+      sqlText: options.sqlText,
+      binds: options.binds,
+      complete: function (err, stmt, rows) {
+        if (err) {
+          console.error(`Error executing query "${options.sqlText}":`, err);
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      },
+    });
+  });
 };
 
-// Export the execute function
-module.exports = { execute };
+// Export the execute function and connectToSnowflake
+module.exports = { execute, connectToSnowflake };
