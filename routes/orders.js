@@ -8,7 +8,7 @@ const authMiddleware = require('../middleware/auth');
 
 // Place a new order (Buyers only)
 router.post('/', authMiddleware, async (req, res) => {
-  const { items } = req.body; // items is an array of { productId, quantity }
+  const { items } = req.body; // items is an array of { productName, quantity }
   const buyerId = req.user.id;
   const role = req.user.role;
 
@@ -28,19 +28,43 @@ router.post('/', authMiddleware, async (req, res) => {
     await db.execute({ sqlText: 'BEGIN', binds: [] });
 
     for (const item of items) {
-      const { productId, quantity } = item;
+      const { productName, quantity } = item;
 
-      // Fetch product details
+      console.log('Processing item:', item);
+      console.log('Product Name:', productName);
+      console.log('Quantity:', quantity);
+
+      // Validate productName and quantity
+      if (!productName || typeof productName !== 'string') {
+        throw new Error('Invalid product name');
+      }
+      if (!quantity || !Number.isInteger(quantity) || quantity <= 0) {
+        throw new Error('Invalid quantity');
+      }
+
+      // Fetch product details using product name
       const productResult = await db.execute({
-        sqlText: `SELECT * FROM PRODUCTS WHERE PRODUCT_ID = ?`,
-        binds: [productId],
+        sqlText: `SELECT * FROM PRODUCTS WHERE NAME = ?`,
+        binds: [productName],
       });
 
-      const product = productResult[0]; // Assuming productResult is an array of rows
+      console.log('Product Result:', productResult);
 
-      if (!product) {
-        throw new Error(`Product with ID ${productId} not found`);
+      if (!productResult || productResult.length === 0) {
+        throw new Error(`Product with name "${productName}" not found`);
       }
+
+      // Handle multiple products with the same name
+      if (productResult.length > 1) {
+        throw new Error(
+          `Multiple products found with name "${productName}". Please specify further.`
+        );
+      }
+
+      const product = productResult[0];
+      const productId = product.PRODUCT_ID;
+
+      console.log('Product ID:', productId);
 
       if (product.STOCK < quantity) {
         throw new Error(`Insufficient stock for product ${product.NAME}`);
@@ -48,6 +72,10 @@ router.post('/', authMiddleware, async (req, res) => {
 
       const itemTotal = product.PRICE * quantity;
       totalAmount += itemTotal;
+
+      console.log('Updating product stock...');
+      console.log('Quantity:', quantity);
+      console.log('Product ID:', productId);
 
       // Update product stock
       await db.execute({
@@ -57,19 +85,33 @@ router.post('/', authMiddleware, async (req, res) => {
 
       // Insert order item
       const ORDER_ITEM_ID = uuidv4();
+      console.log('Inserting order item...');
+      console.log('ORDER_ITEM_ID:', ORDER_ITEM_ID);
+      console.log('ORDER_ID:', ORDER_ID);
+      console.log('Product ID:', productId);
+      console.log('Product Name:', productName);
+      console.log('Quantity:', quantity);
+      console.log('Price:', product.PRICE);
+
       await db.execute({
         sqlText: `
           INSERT INTO ORDER_ITEMS (
             ORDER_ITEM_ID,
             ORDER_ID,
             PRODUCT_ID,
+            PRODUCT_NAME,
             QUANTITY,
             PRICE
-          ) VALUES (?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?)
         `,
-        binds: [ORDER_ITEM_ID, ORDER_ID, productId, quantity, product.PRICE],
+        binds: [ORDER_ITEM_ID, ORDER_ID, productId, productName, quantity, product.PRICE],
       });
     }
+
+    console.log('Creating order...');
+    console.log('ORDER_ID:', ORDER_ID);
+    console.log('Buyer ID:', buyerId);
+    console.log('Total Amount:', totalAmount);
 
     // Create order
     await db.execute({
