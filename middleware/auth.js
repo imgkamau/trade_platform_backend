@@ -24,8 +24,27 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded.user; // Attach the user payload to the request
-    console.log('User decoded from token:', JSON.stringify(req.user, null, 2)); // Pretty print for better readability
+    
+    // Determine payload structure
+    if (decoded.user) { // Pattern A
+      if (!decoded.user.id || !decoded.user.role) {
+        console.error('Token payload is missing user.id or user.role');
+        return res.status(401).json({ message: 'Token payload is invalid' });
+      }
+      req.user = decoded.user;
+    } else { // Pattern B
+      if (!decoded.id || !decoded.role) {
+        console.error('Token payload is missing id or role');
+        return res.status(401).json({ message: 'Token payload is invalid' });
+      }
+      req.user = { id: decoded.id, role: decoded.role };
+    }
+
+    // Optional: Sanitize logs in production
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('User decoded from token:', JSON.stringify(req.user, null, 2));
+    }
+    
     next();
   } catch (error) {
     console.error('Token verification error:', error.name, error.message);

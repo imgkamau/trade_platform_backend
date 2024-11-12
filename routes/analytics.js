@@ -16,9 +16,9 @@ router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req,
     const totalRevenueResult = await db.execute({
       sqlText: `
         SELECT SUM(oi.PRICE * oi.QUANTITY) AS TOTAL_REVENUE
-        FROM ORDERS o
-        JOIN ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
-        JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+        FROM trade.gwtrade.ORDERS o
+        JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
+        JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
         WHERE p.SELLER_ID = ?
       `,
       binds: [sellerId],
@@ -30,9 +30,9 @@ router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req,
     const numberOfOrdersResult = await db.execute({
       sqlText: `
         SELECT COUNT(DISTINCT o.ORDER_ID) AS NUMBER_OF_ORDERS
-        FROM ORDERS o
-        JOIN ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
-        JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+        FROM trade.gwtrade.ORDERS o
+        JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
+        JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
         WHERE p.SELLER_ID = ?
       `,
       binds: [sellerId],
@@ -46,9 +46,9 @@ router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req,
         SELECT AVG(order_total) AS AVERAGE_ORDER_VALUE
         FROM (
           SELECT o.ORDER_ID, SUM(oi.PRICE * oi.QUANTITY) AS order_total
-          FROM ORDERS o
-          JOIN ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
-          JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+          FROM trade.gwtrade.ORDERS o
+          JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
+          JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
           WHERE p.SELLER_ID = ?
           GROUP BY o.ORDER_ID
         ) sub
@@ -64,9 +64,9 @@ router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req,
         SELECT
           SUM(CASE WHEN DATE_TRUNC('month', o.CREATED_AT) = DATE_TRUNC('month', CURRENT_DATE()) THEN oi.PRICE * oi.QUANTITY ELSE 0 END) AS CURRENT_MONTH_REVENUE,
           SUM(CASE WHEN DATE_TRUNC('month', o.CREATED_AT) = DATE_TRUNC('month', DATEADD('month', -1, CURRENT_DATE())) THEN oi.PRICE * oi.QUANTITY ELSE 0 END) AS PREVIOUS_MONTH_REVENUE
-        FROM ORDERS o
-        JOIN ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
-        JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+        FROM trade.gwtrade.ORDERS o
+        JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
+        JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
         WHERE p.SELLER_ID = ?
       `,
       binds: [sellerId],
@@ -105,8 +105,8 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
     const topSellingProductsResult = await db.execute({
       sqlText: `
         SELECT p.PRODUCT_ID, p.NAME, SUM(oi.QUANTITY) AS TOTAL_QUANTITY_SOLD
-        FROM ORDER_ITEMS oi
-        JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+        FROM trade.gwtrade.ORDER_ITEMS oi
+        JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
         WHERE p.SELLER_ID = ?
         GROUP BY p.PRODUCT_ID, p.NAME
         ORDER BY TOTAL_QUANTITY_SOLD DESC
@@ -121,7 +121,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
     const lowStockProductsResult = await db.execute({
       sqlText: `
         SELECT PRODUCT_ID, NAME, STOCK
-        FROM PRODUCTS
+        FROM trade.gwtrade.PRODUCTS
         WHERE SELLER_ID = ? AND STOCK <= 10
         ORDER BY STOCK ASC
       `,
@@ -134,7 +134,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
     const productCategoryDistributionResult = await db.execute({
       sqlText: `
         SELECT CATEGORY, COUNT(*) AS PRODUCT_COUNT
-        FROM PRODUCTS
+        FROM trade.gwtrade.PRODUCTS
         WHERE SELLER_ID = ?
         GROUP BY CATEGORY
       `,
@@ -167,9 +167,9 @@ router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async 
         SELECT
           DATE_TRUNC('day', o.CREATED_AT) AS DATE,
           SUM(oi.PRICE * oi.QUANTITY) AS TOTAL_REVENUE
-        FROM ORDERS o
-        JOIN ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
-        JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+        FROM trade.gwtrade.ORDERS o
+        JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
+        JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
         WHERE p.SELLER_ID = ?
           AND o.CREATED_AT >= DATEADD('day', -30, CURRENT_DATE())
         GROUP BY DATE_TRUNC('day', o.CREATED_AT)
@@ -186,9 +186,9 @@ router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async 
         SELECT
           EXTRACT(HOUR FROM o.CREATED_AT) AS HOUR,
           SUM(oi.PRICE * oi.QUANTITY) AS TOTAL_REVENUE
-        FROM ORDERS o
-        JOIN ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
-        JOIN PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+        FROM trade.gwtrade.ORDERS o
+        JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
+        JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
         WHERE p.SELLER_ID = ?
           AND o.CREATED_AT >= DATEADD('day', -7, CURRENT_DATE())
         GROUP BY EXTRACT(HOUR FROM o.CREATED_AT)
