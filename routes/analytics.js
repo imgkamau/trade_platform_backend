@@ -7,7 +7,8 @@ const authMiddleware = require('../middleware/auth'); // Authentication middlewa
 const authorize = require('../middleware/authorize'); // Authorization middleware
 
 // Sales Overview Endpoint
-router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req, res) => {
+//router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req, res) => {
+router.get('/', authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
 
   try {
