@@ -7,9 +7,9 @@ const authMiddleware = require('../middleware/auth'); // Authentication middlewa
 const authorize = require('../middleware/authorize'); // Authorization middleware
 
 // Sales Overview Endpoint
-//router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req, res) => {
-router.get('/', authorize(['seller']), async (req, res) => {
+router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
+  console.log(`Processing sales-overview for Seller ID: ${sellerId}`);
 
   try {
     // Total Revenue
@@ -23,7 +23,7 @@ router.get('/', authorize(['seller']), async (req, res) => {
       `,
       binds: [sellerId],
     });
-
+    console.log('Total Revenue Result:', totalRevenueResult);
     const totalRevenue = totalRevenueResult[0]?.TOTAL_REVENUE || 0;
 
     // Number of Orders
@@ -37,7 +37,7 @@ router.get('/', authorize(['seller']), async (req, res) => {
       `,
       binds: [sellerId],
     });
-
+    console.log('Number of Orders Result:', numberOfOrdersResult);
     const numberOfOrders = numberOfOrdersResult[0]?.NUMBER_OF_ORDERS || 0;
 
     // Average Order Value
@@ -55,7 +55,7 @@ router.get('/', authorize(['seller']), async (req, res) => {
       `,
       binds: [sellerId],
     });
-
+    console.log('Average Order Value Result:', averageOrderValueResult);
     const averageOrderValue = averageOrderValueResult[0]?.AVERAGE_ORDER_VALUE || 0;
 
     // Sales Growth
@@ -71,7 +71,7 @@ router.get('/', authorize(['seller']), async (req, res) => {
       `,
       binds: [sellerId],
     });
-
+    console.log('Sales Growth Result:', salesGrowthResult);
     const currentMonthRevenue = salesGrowthResult[0]?.CURRENT_MONTH_REVENUE || 0;
     const previousMonthRevenue = salesGrowthResult[0]?.PREVIOUS_MONTH_REVENUE || 0;
 
@@ -98,6 +98,7 @@ router.get('/', authorize(['seller']), async (req, res) => {
 // Product Performance Endpoint
 router.get('/product-performance', authMiddleware, authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
+  console.log(`Processing product-performance for Seller ID: ${sellerId}`);
 
   try {
     // Top Selling Products
@@ -113,7 +114,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
       `,
       binds: [sellerId],
     });
-
+    console.log('Top Selling Products Result:', topSellingProductsResult);
     const topSellingProducts = topSellingProductsResult;
 
     // Products with Low Stock
@@ -126,7 +127,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
       `,
       binds: [sellerId],
     });
-
+    console.log('Low Stock Products Result:', lowStockProductsResult);
     const lowStockProducts = lowStockProductsResult;
 
     // Product Category Distribution
@@ -139,7 +140,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
       `,
       binds: [sellerId],
     });
-
+    console.log('Product Category Distribution Result:', productCategoryDistributionResult);
     const productCategoryDistribution = productCategoryDistributionResult;
 
     // Send the response
@@ -157,6 +158,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
 // Time-Based Analysis Endpoint
 router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
+  console.log(`Processing time-based-analysis for Seller ID: ${sellerId}`);
 
   try {
     // Daily Sales Trends
@@ -175,7 +177,7 @@ router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async 
       `,
       binds: [sellerId],
     });
-
+    console.log('Daily Sales Result:', dailySalesResult);
     const dailySales = dailySalesResult;
 
     // Peak Sales Hours
@@ -195,7 +197,7 @@ router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async 
       `,
       binds: [sellerId],
     });
-
+    console.log('Peak Sales Hours Result:', peakSalesHoursResult);
     const peakSalesHours = peakSalesHoursResult;
 
     // Send the response
