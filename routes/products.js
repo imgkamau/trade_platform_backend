@@ -44,21 +44,24 @@ router.get('/', async (req, res) => {
 
 // POST /api/products - Create a new product (Sellers only)
 router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
-  const { NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID } = req.body;
-  const sellerId = req.user.id; // Get seller ID from req.user
+  const { NAME, DESCRIPTION, PRICE, STOCK } = req.body;
+  const SELLER_ID = req.user.id; // Get SELLER_ID from the authenticated user
 
   // Validate input
-  if (!NAME || !DESCRIPTION || !PRICE || !STOCK || !SELLER_ID) {
+  if (!NAME || !DESCRIPTION || !PRICE || !STOCK) {
     return res.status(400).json({ message: 'All fields are required' });
   }
 
   try {
-    const productId = uuidv4(); // Generate a unique ID for the product
+    const PRODUCT_ID = uuidv4(); // Generate a unique ID for the product
 
     // Insert the new product into the database
     await db.execute({
-      sqlText: `INSERT INTO PRODUCTS (PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID) VALUES (?, ?, ?, ?, ?, ?)`,
-      binds: [productId, NAME, DESCRIPTION, PRICE, STOCK, sellerId],
+      sqlText: `
+        INSERT INTO PRODUCTS (PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      binds: [PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID],
     });
 
     res.status(201).json({ message: 'Product created successfully' });
@@ -68,7 +71,6 @@ router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
   }
 });
 
-// Update a product (Exporters only)
 // Update a product (Sellers only)
 router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res) => {
   const { productId } = req.params;
