@@ -13,7 +13,7 @@ This is the backend for the **Kenya-EU Trade Platform**, which connects sellers 
 
 - Node.js
 - Express.js
-- MongoDB (or another database of your choice)
+- Snowflake
 - JWT for authentication
 
 ## Installation
