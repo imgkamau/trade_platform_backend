@@ -8,7 +8,7 @@ const logger = require('./utils/logger');
 const refreshTokenRoute = require('./routes/refreshToken');
 const authRouter = require('./routes/auth');
 const productsRouter = require('./routes/products');
-const messagesRouter = require('./routes/messages');
+//const messagesRouter = require('./routes/messages');
 const ordersRouter = require('./routes/orders');
 const authMiddleware = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
@@ -19,6 +19,10 @@ const shippingRouter = require('./routes/shipping');
 const checklistsRouter = require('./routes/checklists');
 const quotesRoutes = require('./routes/quotes');
 const analyticsRouter = require('./routes/analytics');
+const messagesRouter = require('./routes/messages'); // Messages Router
+const conversationsRouter = require('./routes/conversations'); // Conversations Router
+const inquiriesRouter = require('./routes/inquiries'); // Inquiries Router
+const contactsRouter = require('./routes/contacts'); // Contacts Router
 const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 
 // Load environment variables from .env file
@@ -65,6 +69,10 @@ app.use('/api/shipping', shippingRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/messages', messagesRouter); // Register Messages Router
+app.use('/api/conversations', conversationsRouter); // Register Conversations Router
+app.use('/api/inquiries', inquiriesRouter);
+app.use('/api/contacts', contactsRouter);
 // Root Route
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');

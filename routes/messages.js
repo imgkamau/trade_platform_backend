@@ -2,101 +2,164 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../db');
-const { v4: uuidv4 } = require('uuid');
-const authMiddleware = require('../middleware/auth');
+const db = require('../db'); // Your database module
+const { v4: uuidv4 } = require('uuid'); // For generating UUIDs
+const authMiddleware = require('../middleware/auth'); // Authentication middleware
+const authorize = require('../middleware/authorize'); // Authorization middleware
 
-// Send a message
-router.post('/', authMiddleware, async (req, res) => {
-  const { recipient_id, content } = req.body;
-  const sender_id = req.user.id;
+// GET /api/messages/:conversationId - Get all messages in a conversation
+router.get('/:conversationId', authMiddleware, authorize(['buyer', 'seller']), async (req, res) => {
+    const { conversationId } = req.params;
+    const userId = req.user.id;
 
-  if (!recipient_id || !content) {
-    return res.status(400).json({ message: 'Recipient and content are required' });
-  }
+    try {
+        // Verify that the user is part of the conversation
+        const conversation = await db.execute({
+            sqlText: `
+                SELECT * FROM trade.gwtrade.CONVERSATIONS
+                WHERE CONVERSATION_ID = ? AND (SELLER_ID = ? OR BUYER_ID = ?)
+            `,
+            binds: [conversationId, userId, userId],
+        });
 
-  try {
-    // Create a new message
-    const MESSAGE_ID = uuidv4();
+        if (!conversation || conversation.length === 0) {
+            return res.status(404).json({ message: 'Conversation not found or access denied' });
+        }
 
-    await db.execute({
-      sqlText: `INSERT INTO MESSAGES (
-        MESSAGE_ID,
-        SENDER_ID,
-        RECIPIENT_ID,
-        CONTENT
-      ) VALUES (?, ?, ?, ?)`,
-      binds: [MESSAGE_ID, sender_id, recipient_id, content],
-    });
+        // Fetch messages
+        const messages = await db.execute({
+            sqlText: `
+                SELECT 
+                    MESSAGE_ID,
+                    SENDER_ID,
+                    RECIPIENT_ID,
+                    CONTENT,
+                    TIMESTAMP
+                FROM trade.gwtrade.MESSAGES
+                WHERE CONVERSATION_ID = ?
+                ORDER BY TIMESTAMP ASC
+            `,
+            binds: [conversationId],
+        });
 
-    res.status(201).json({ message: 'Message sent successfully' });
-  } catch (error) {
-    console.error('Message sending error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
+        res.json(messages);
+    } catch (error) {
+        console.error('Error fetching messages:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
 });
 
-// Get messages between the authenticated user and another user
-router.get('/:userId', authMiddleware, async (req, res) => {
-  const userId = req.params.userId;
-  const currentUserId = req.user.id;
+// POST /api/messages - Send a new message
+router.post('/', authMiddleware, authorize(['buyer', 'seller']), async (req, res) => {
+    const { recipient_id, content, conversation_id } = req.body;
+    const senderId = req.user.id;
 
-  try {
-    const messages = await db.execute({
-      sqlText: `SELECT * FROM MESSAGES
-        WHERE (SENDER_ID = ? AND RECIPIENT_ID = ?)
-        OR (SENDER_ID = ? AND RECIPIENT_ID = ?)
-        ORDER BY TIMESTAMP ASC`,
-      binds: [currentUserId, userId, userId, currentUserId],
-    });
-
-    res.json(messages);
-  } catch (error) {
-    console.error('Error fetching messages:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
-
-// Get list of conversations for the authenticated user
-router.get('/', authMiddleware, async (req, res) => {
-  const currentUserId = req.user.id;
-
-  try {
-    const conversations = await db.execute({
-      sqlText: `
-        SELECT DISTINCT
-          CASE
-            WHEN SENDER_ID = ? THEN RECIPIENT_ID
-            ELSE SENDER_ID
-          END AS USER_ID
-        FROM MESSAGES
-        WHERE SENDER_ID = ? OR RECIPIENT_ID = ?
-      `,
-      binds: [currentUserId, currentUserId, currentUserId],
-    });
-
-    // Extract user IDs from the result
-    const userIds = conversations.map((row) => row.USER_ID);
-
-    if (userIds.length === 0) {
-      return res.json([]); // No conversations
+    if (!recipient_id || !content) {
+        return res.status(400).json({ message: 'Recipient ID and content are required' });
     }
 
-    // Fetch user details for each conversation
-    const users = await db.execute({
-      sqlText: `
-        SELECT USER_ID, USERNAME, FULL_NAME, COMPANY_NAME
-        FROM USERS
-        WHERE USER_ID IN (${userIds.map(() => '?').join(',')})
-      `,
-      binds: userIds,
-    });
+    try {
+        let conversationId = conversation_id;
 
-    res.json(users);
-  } catch (error) {
-    console.error('Error fetching conversations:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
+        // If conversation_id is not provided, attempt to find or create one
+        if (!conversationId) {
+            // Fetch the user's role
+            const userResult = await db.execute({
+                sqlText: `SELECT ROLE FROM trade.gwtrade.USERS WHERE USER_ID = ?`,
+                binds: [senderId],
+            });
+
+            if (!userResult || userResult.length === 0) {
+                return res.status(404).json({ message: 'User not found' });
+            }
+
+            const senderRole = userResult[0].ROLE;
+
+            // Fetch recipient's role
+            const recipientResult = await db.execute({
+                sqlText: `SELECT ROLE FROM trade.gwtrade.USERS WHERE USER_ID = ?`,
+                binds: [recipient_id],
+            });
+
+            if (!recipientResult || recipientResult.length === 0) {
+                return res.status(404).json({ message: 'Recipient not found' });
+            }
+
+            const recipientRole = recipientResult[0].ROLE;
+
+            // Determine seller and buyer
+            let sellerId, buyerId;
+            if (senderRole === 'seller' && recipientRole === 'buyer') {
+                sellerId = senderId;
+                buyerId = recipient_id;
+            } else if (senderRole === 'buyer' && recipientRole === 'seller') {
+                sellerId = recipient_id;
+                buyerId = senderId;
+            } else {
+                return res.status(400).json({ message: 'Invalid roles for conversation' });
+            }
+
+            // Find existing conversation
+            const existingConversation = await db.execute({
+                sqlText: `
+                    SELECT CONVERSATION_ID trade.gwtrade.FROM CONVERSATIONS
+                    WHERE SELLER_ID = ? AND BUYER_ID = ? AND PRODUCT_ID IS NULL
+                    LIMIT 1
+                `,
+                binds: [sellerId, buyerId],
+            });
+
+            if (existingConversation && existingConversation.length > 0) {
+                conversationId = existingConversation[0].CONVERSATION_ID;
+            } else {
+                // Create new conversation
+                conversationId = uuidv4();
+                await db.execute({
+                    sqlText: `
+                        INSERT INTO trade.gwtrade.CONVERSATIONS (CONVERSATION_ID, SELLER_ID, BUYER_ID, PRODUCT_ID)
+                        VALUES (?, ?, ?, NULL)
+                    `,
+                    binds: [conversationId, sellerId, buyerId],
+                });
+            }
+        } else {
+            // Verify that the user is part of the conversation
+            const conversation = await db.execute({
+                sqlText: `
+                    SELECT * FROM trade.gwtrade.CONVERSATIONS
+                    WHERE CONVERSATION_ID = ? AND (SELLER_ID = ? OR BUYER_ID = ?)
+                `,
+                binds: [conversationId, senderId, senderId],
+            });
+
+            if (!conversation || conversation.length === 0) {
+                return res.status(404).json({ message: 'Conversation not found or access denied' });
+            }
+        }
+
+        // Insert the new message
+        const messageId = uuidv4();
+        const timestamp = new Date().toISOString();
+
+        await db.execute({
+            sqlText: `
+                INSERT INTO trade.gwtrade.MESSAGES (MESSAGE_ID, CONVERSATION_ID, SENDER_ID, RECIPIENT_ID, CONTENT, TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `,
+            binds: [messageId, conversationId, senderId, recipient_id, content, timestamp],
+        });
+
+        res.status(201).json({
+            MESSAGE_ID: messageId,
+            SENDER_ID: senderId,
+            RECIPIENT_ID: recipient_id,
+            CONTENT: content,
+            TIMESTAMP: timestamp,
+        });
+    } catch (error) {
+        console.error('Error sending message:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
 });
 
 module.exports = router;
