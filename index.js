@@ -30,11 +30,18 @@ dotenv.config();
 const app = express();
 
 // CORS configuration
+// const corsOptions = {
+//   origin:
+//     process.env.NODE_ENV === 'production'
+//       ? process.env.FRONTEND_URL || 'https://ke-eutrade.org'
+//       : process.env.FRONTEND_URL || 'http://localhost:3000',
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization'],
+//   credentials: true,
+//   optionsSuccessStatus: 204,
+// };
 const corsOptions = {
-  origin:
-    process.env.NODE_ENV === 'production'
-      ? process.env.FRONTEND_URL || 'https://ke-eutrade.org'
-      : process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: 'https://www.ke-eutrade.org', // Hardcoded allowed origin
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
