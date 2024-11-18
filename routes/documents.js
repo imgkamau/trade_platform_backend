@@ -12,9 +12,17 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
+const AWS = require('aws-sdk');
 
 // Load environment variables
 require('dotenv').config();
+
+// Configure AWS SDK
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID, // Set these in your environment variables
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION,
+});
 
 // CORS configuration
 const corsOptions = {
@@ -141,9 +149,10 @@ router.post(
       'Certificate of Origin': 2,
       'Invoice': 3,
       'Packing List': 4,
-      'Global Gap Certificate':5,
-      'Other':6,// Add other types as needed
-
+      'Phytosanitary Certificate': 5,
+      'Global Gap Certificate': 6,
+      'Other': 7,
+      // Add other types as needed
     };
 
     const typeId = documentTypeMap[documentType];
@@ -164,15 +173,33 @@ router.post(
     const documentId = uuidv4();
     const filePath = document.path; // This will now be in the /tmp directory
 
-    logger.info('Inserting document into database', {
-      documentId,
-      shipmentId,
-      typeId,
-      filePath,
-      userId,
-    });
+    logger.info('Uploading file to S3', { filePath });
 
     try {
+      // Read the file content
+      const fileContent = fs.readFileSync(filePath);
+
+      // Set up S3 upload parameters
+      const params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `documents/${documentId}-${document.originalname}`,
+        Body: fileContent,
+        ContentType: document.mimetype,
+      };
+
+      // Upload the file to S3
+      const s3Data = await s3.upload(params).promise();
+      logger.info(`File uploaded to S3 at ${s3Data.Location}`);
+
+      // Delete the file from the /tmp directory
+      fs.unlink(filePath, (err) => {
+        if (err) {
+          logger.error('Error deleting file from /tmp:', err);
+        } else {
+          logger.info('Deleted file from /tmp');
+        }
+      });
+
       // Insert the document metadata into the database
       await db.execute({
         sqlText: `
@@ -184,53 +211,10 @@ router.post(
             USER_ID
           ) VALUES (?, ?, ?, ?, ?)
         `,
-        binds: [documentId, shipmentId, typeId, filePath, userId],
+        binds: [documentId, shipmentId, typeId, s3Data.Location, userId],
       });
 
       logger.info(`Document uploaded successfully with ID: ${documentId}`);
-
-      // Note: Since the file is stored in a temporary directory, it will not persist across function invocations.
-      // You should upload the file to a persistent storage (e.g., AWS S3) here.
-
-      // Example code to upload to AWS S3 (if you choose to use S3):
-      /*
-      const AWS = require('aws-sdk');
-      const s3 = new AWS.S3({
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        region: process.env.AWS_REGION,
-      });
-
-      const fileContent = fs.readFileSync(filePath);
-      const params = {
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: `documents/${path.basename(filePath)}`,
-        Body: fileContent,
-        ContentType: document.mimetype,
-      };
-
-      const s3Data = await s3.upload(params).promise();
-      logger.info(`File uploaded to S3 at ${s3Data.Location}`);
-
-      // Update the filePath in the database to the S3 URL or key
-      await db.execute({
-        sqlText: `
-          UPDATE trade.gwtrade.Documents
-          SET FILE_PATH = ?
-          WHERE DOCUMENT_ID = ?
-        `,
-        binds: [s3Data.Location, documentId],
-      });
-
-      // Delete the file from the /tmp directory
-      fs.unlink(filePath, (err) => {
-        if (err) {
-          logger.error('Error deleting file from /tmp:', err);
-        } else {
-          logger.info('Deleted file from /tmp');
-        }
-      });
-      */
 
       // Send response to the client
       return res.status(201).json({
@@ -240,25 +224,65 @@ router.post(
         shipmentId,
       });
     } catch (error) {
-      logger.error('Error inserting document into database:', error);
+      logger.error('Error uploading file to S3 or inserting into database:', error);
       // Delete the uploaded file in case of an error
-      fs.unlink(document.path, (unlinkErr) => {
+      fs.unlink(filePath, (unlinkErr) => {
         if (unlinkErr) {
           logger.error(
-            'Error deleting file after insert failure:',
+            'Error deleting file after upload failure:',
             unlinkErr
           );
         } else {
-          logger.info('Deleted uploaded file due to insert failure');
+          logger.info('Deleted uploaded file due to upload failure');
         }
       });
       return res.status(500).json({
-        message: 'Server error',
+        message: 'Server error during file upload',
         error: error.message,
       });
     }
   }
 );
+
+// Apply authentication and authorization middleware to subsequent routes
+router.use(authMiddleware);
+router.use(authorize(['seller', 'buyer']));
+
+// GET: Fetch documents
+router.get('/', async (req, res) => {
+  try {
+    db.execute({
+      sqlText: `
+        SELECT 
+          DOCUMENT_ID,
+          SHIPMENT_ID,
+          TYPE_ID,
+          FILE_PATH,
+          CREATED_AT
+        FROM trade.gwtrade.Documents
+        ORDER BY CREATED_AT DESC
+      `,
+      complete: function (err, stmt, rows) {
+        if (err) {
+          logger.error('Error fetching documents:', err);
+          return res.status(500).json({
+            message: 'Server error',
+            error: err.message,
+          });
+        } else {
+          logger.info(`Fetched ${rows.length} documents.`);
+          res.json(rows);
+        }
+      },
+    });
+  } catch (error) {
+    logger.error('Error fetching documents:', error);
+    res.status(500).json({
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+});
 
 // GET: Download a specific document
 router.get('/:documentId', async (req, res) => {
@@ -287,22 +311,19 @@ router.get('/:documentId', async (req, res) => {
           }
 
           const document = rows[0];
-          const absolutePath = path.join(__dirname, '..', document.FILE_PATH);
+          const fileUrl = document.FILE_PATH;
 
-          // Check if file exists
-          if (!fs.existsSync(absolutePath)) {
-            logger.error(`File not found at path: ${absolutePath}`);
-            return res.status(404).json({ message: 'File not found.' });
-          }
+          // Generate a pre-signed URL for secure access
+          const params = {
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: `documents/${path.basename(fileUrl)}`,
+            Expires: 60, // URL expires in 60 seconds
+          };
 
-          res.download(absolutePath, path.basename(absolutePath), (err) => {
-            if (err) {
-              logger.error('Error sending file:', err);
-              res.status(500).json({ message: 'Error downloading file.' });
-            } else {
-              logger.info(`File sent: ${absolutePath}`);
-            }
-          });
+          const url = s3.getSignedUrl('getObject', params);
+
+          // Send the pre-signed URL to the client
+          res.json({ url });
         }
       },
     });
@@ -320,7 +341,7 @@ router.delete('/:documentId', async (req, res) => {
   const { documentId } = req.params;
 
   try {
-    // First, retrieve the file path
+    // Fetch the document record from the database
     db.execute({
       sqlText: `
         SELECT FILE_PATH
@@ -328,7 +349,7 @@ router.delete('/:documentId', async (req, res) => {
         WHERE DOCUMENT_ID = ?
       `,
       binds: [documentId],
-      complete: function (err, stmt) {
+      complete: async function (err, stmt, rows) {
         if (err) {
           logger.error('Error fetching document:', err);
           return res.status(500).json({
@@ -336,59 +357,41 @@ router.delete('/:documentId', async (req, res) => {
             error: err.message,
           });
         } else {
-          stmt.getRows(function (err, rows) {
+          if (rows.length === 0) {
+            return res.status(404).json({ message: 'Document not found' });
+          }
+
+          const document = rows[0];
+          const fileUrl = document.FILE_PATH;
+          const key = `documents/${path.basename(fileUrl)}`;
+
+          // Delete the file from S3
+          const params = {
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: key,
+          };
+
+          s3.deleteObject(params, async (err, data) => {
             if (err) {
-              logger.error('Error fetching rows:', err);
+              logger.error('Error deleting file from S3:', err);
               return res.status(500).json({
-                message: 'Server error',
+                message: 'Error deleting file from S3',
                 error: err.message,
               });
             } else {
-              if (rows.length === 0) {
-                return res.status(404).json({ message: 'Document not found' });
-              }
-              const document = rows[0];
-              const absolutePath = path.join(
-                __dirname,
-                '..',
-                document.FILE_PATH
-              );
+              logger.info('File deleted from S3');
 
-              // Delete the file from the filesystem
-              fs.unlink(absolutePath, (err) => {
-                if (err) {
-                  logger.error(
-                    `Error deleting file at ${absolutePath}: ${err.message}`
-                  );
-                  return res
-                    .status(500)
-                    .json({ message: 'Error deleting file.' });
-                }
-
-                // Delete the record from the database
-                db.execute({
-                  sqlText:
-                    'DELETE FROM trade.gwtrade.Documents WHERE DOCUMENT_ID = ?',
-                  binds: [documentId],
-                  complete: function (err) {
-                    if (err) {
-                      logger.error(
-                        'Error deleting document from database:',
-                        err
-                      );
-                      return res.status(500).json({
-                        message: 'Server error',
-                        error: err.message,
-                      });
-                    } else {
-                      logger.info(
-                        `Document ID: ${documentId} deleted successfully.`
-                      );
-                      res.json({ message: 'Document deleted successfully.' });
-                    }
-                  },
-                });
+              // Delete the record from the database
+              await db.execute({
+                sqlText: `
+                  DELETE FROM trade.gwtrade.Documents
+                  WHERE DOCUMENT_ID = ?
+                `,
+                binds: [documentId],
               });
+
+              logger.info(`Document ID: ${documentId} deleted successfully.`);
+              res.json({ message: 'Document deleted successfully.' });
             }
           });
         }
