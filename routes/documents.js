@@ -8,6 +8,7 @@ const db = require('../db');
 const authMiddleware = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
 const { v4: uuidv4 } = require('uuid');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
@@ -30,16 +31,13 @@ const corsOptions = {
 // Apply CORS middleware to the router
 router.use(cors(corsOptions));
 
-// Configure Multer storage
+// Configure Multer storage to use the system temporary directory
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '..', 'uploads');
-    fs.mkdirSync(uploadPath, { recursive: true });
-    cb(null, uploadPath);
+  destination: function (req, file, cb) {
+    cb(null, os.tmpdir()); // Use the /tmp directory
   },
-  filename: (req, file, cb) => {
-    const uniqueName = `${uuidv4()}-${file.originalname}`;
-    cb(null, uniqueName);
+  filename: function (req, file, cb) {
+    cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
 
@@ -141,10 +139,11 @@ router.post(
     const documentTypeMap = {
       'Export Permit': 1,
       'Certificate of Origin': 2,
-      Invoice: 3,
+      'Invoice': 3,
       'Packing List': 4,
       'Global Gap Certificate':5,
       'Other':6,// Add other types as needed
+
     };
 
     const typeId = documentTypeMap[documentType];
@@ -163,7 +162,7 @@ router.post(
     }
 
     const documentId = uuidv4();
-    const filePath = path.relative(path.join(__dirname, '..'), document.path);
+    const filePath = document.path; // This will now be in the /tmp directory
 
     logger.info('Inserting document into database', {
       documentId,
@@ -174,7 +173,7 @@ router.post(
     });
 
     try {
-      // Execute the database insertion
+      // Insert the document metadata into the database
       await db.execute({
         sqlText: `
           INSERT INTO trade.gwtrade.Documents (
@@ -189,6 +188,51 @@ router.post(
       });
 
       logger.info(`Document uploaded successfully with ID: ${documentId}`);
+
+      // Note: Since the file is stored in a temporary directory, it will not persist across function invocations.
+      // You should upload the file to a persistent storage (e.g., AWS S3) here.
+
+      // Example code to upload to AWS S3 (if you choose to use S3):
+      /*
+      const AWS = require('aws-sdk');
+      const s3 = new AWS.S3({
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        region: process.env.AWS_REGION,
+      });
+
+      const fileContent = fs.readFileSync(filePath);
+      const params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `documents/${path.basename(filePath)}`,
+        Body: fileContent,
+        ContentType: document.mimetype,
+      };
+
+      const s3Data = await s3.upload(params).promise();
+      logger.info(`File uploaded to S3 at ${s3Data.Location}`);
+
+      // Update the filePath in the database to the S3 URL or key
+      await db.execute({
+        sqlText: `
+          UPDATE trade.gwtrade.Documents
+          SET FILE_PATH = ?
+          WHERE DOCUMENT_ID = ?
+        `,
+        binds: [s3Data.Location, documentId],
+      });
+
+      // Delete the file from the /tmp directory
+      fs.unlink(filePath, (err) => {
+        if (err) {
+          logger.error('Error deleting file from /tmp:', err);
+        } else {
+          logger.info('Deleted file from /tmp');
+        }
+      });
+      */
+
+      // Send response to the client
       return res.status(201).json({
         message: 'Document uploaded successfully',
         documentId,
@@ -215,46 +259,6 @@ router.post(
     }
   }
 );
-
-// Apply authentication and authorization middleware to subsequent routes
-//router.use(authMiddleware);
-//router.use(authorize(['seller', 'buyer']));
-
-// GET: Fetch documents
-router.get('/', async (req, res) => {
-  try {
-    db.execute({
-      sqlText: `
-        SELECT 
-          DOCUMENT_ID,
-          SHIPMENT_ID,
-          TYPE_ID,
-          FILE_PATH,
-          CREATED_AT
-        FROM trade.gwtrade.Documents
-        ORDER BY CREATED_AT DESC
-      `,
-      complete: function (err, stmt, rows) {
-        if (err) {
-          logger.error('Error fetching documents:', err);
-          return res.status(500).json({
-            message: 'Server error',
-            error: err.message,
-          });
-        } else {
-          logger.info(`Fetched ${rows.length} documents.`);
-          res.json(rows);
-        }
-      },
-    });
-  } catch (error) {
-    logger.error('Error fetching documents:', error);
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message,
-    });
-  }
-});
 
 // GET: Download a specific document
 router.get('/:documentId', async (req, res) => {
