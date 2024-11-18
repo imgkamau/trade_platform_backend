@@ -41,7 +41,7 @@ const app = express();
 //   optionsSuccessStatus: 204,
 // };
 const corsOptions = {
-  origin: 'https://www.ke-eutrade.org', // Hardcoded allowed origin
+  origin: 'https://ke-eutrade.org', // Hardcoded allowed origin
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
