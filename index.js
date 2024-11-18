@@ -29,7 +29,7 @@ dotenv.config();
 
 const app = express();
 
-//CORS configuration - test
+// CORS configuration
 const corsOptions = {
   origin:
     process.env.NODE_ENV === 'production'
@@ -40,7 +40,6 @@ const corsOptions = {
   credentials: true,
   optionsSuccessStatus: 204,
 };
-
 
 app.use(cors(corsOptions));
 app.use(express.json());

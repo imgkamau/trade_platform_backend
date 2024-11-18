@@ -250,8 +250,9 @@ router.use(authorize(['seller', 'buyer']));
 
 // GET: Fetch documents
 router.get('/', async (req, res) => {
+  logger.info('Entered GET /api/documents route');
   try {
-    db.execute({
+    const rows = await db.execute({
       sqlText: `
         SELECT 
           DOCUMENT_ID,
@@ -262,19 +263,9 @@ router.get('/', async (req, res) => {
         FROM trade.gwtrade.Documents
         ORDER BY CREATED_AT DESC
       `,
-      complete: function (err, stmt, rows) {
-        if (err) {
-          logger.error('Error fetching documents:', err);
-          return res.status(500).json({
-            message: 'Server error',
-            error: err.message,
-          });
-        } else {
-          logger.info(`Fetched ${rows.length} documents.`);
-          res.json(rows);
-        }
-      },
     });
+    logger.info(`Fetched ${rows.length} documents.`);
+    res.json(rows);
   } catch (error) {
     logger.error('Error fetching documents:', error);
     res.status(500).json({
@@ -287,9 +278,9 @@ router.get('/', async (req, res) => {
 // GET: Download a specific document
 router.get('/:documentId', async (req, res) => {
   const { documentId } = req.params;
-
+  logger.info(`Entered GET /api/documents/${documentId} route`);
   try {
-    db.execute({
+    const rows = await db.execute({
       sqlText: `
         SELECT 
           TYPE_ID,
@@ -298,107 +289,28 @@ router.get('/:documentId', async (req, res) => {
         WHERE DOCUMENT_ID = ?
       `,
       binds: [documentId],
-      complete: function (err, stmt, rows) {
-        if (err) {
-          logger.error('Error fetching document:', err);
-          return res.status(500).json({
-            message: 'Server error',
-            error: err.message,
-          });
-        } else {
-          if (rows.length === 0) {
-            return res.status(404).json({ message: 'Document not found' });
-          }
-
-          const document = rows[0];
-          const fileUrl = document.FILE_PATH;
-
-          // Generate a pre-signed URL for secure access
-          const params = {
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: `documents/${path.basename(fileUrl)}`,
-            Expires: 60, // URL expires in 60 seconds
-          };
-
-          const url = s3.getSignedUrl('getObject', params);
-
-          // Send the pre-signed URL to the client
-          res.json({ url });
-        }
-      },
     });
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const document = rows[0];
+    const fileUrl = document.FILE_PATH;
+
+    // Generate a pre-signed URL for secure access
+    const params = {
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: `documents/${path.basename(fileUrl)}`,
+      Expires: 60, // URL expires in 60 seconds
+    };
+
+    const url = s3.getSignedUrl('getObject', params);
+
+    // Send the pre-signed URL to the client
+    res.json({ url });
   } catch (error) {
     logger.error('Error downloading document:', error);
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message,
-    });
-  }
-});
-
-// DELETE: Remove a document by ID
-router.delete('/:documentId', async (req, res) => {
-  const { documentId } = req.params;
-
-  try {
-    // Fetch the document record from the database
-    db.execute({
-      sqlText: `
-        SELECT FILE_PATH
-        FROM trade.gwtrade.Documents
-        WHERE DOCUMENT_ID = ?
-      `,
-      binds: [documentId],
-      complete: async function (err, stmt, rows) {
-        if (err) {
-          logger.error('Error fetching document:', err);
-          return res.status(500).json({
-            message: 'Server error',
-            error: err.message,
-          });
-        } else {
-          if (rows.length === 0) {
-            return res.status(404).json({ message: 'Document not found' });
-          }
-
-          const document = rows[0];
-          const fileUrl = document.FILE_PATH;
-          const key = `documents/${path.basename(fileUrl)}`;
-
-          // Delete the file from S3
-          const params = {
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: key,
-          };
-
-          s3.deleteObject(params, async (err, data) => {
-            if (err) {
-              logger.error('Error deleting file from S3:', err);
-              return res.status(500).json({
-                message: 'Error deleting file from S3',
-                error: err.message,
-              });
-            } else {
-              logger.info('File deleted from S3');
-
-              // Delete the record from the database
-              await db.execute({
-                sqlText: `
-                  DELETE FROM trade.gwtrade.Documents
-                  WHERE DOCUMENT_ID = ?
-                `,
-                binds: [documentId],
-              });
-
-              logger.info(`Document ID: ${documentId} deleted successfully.`);
-              res.json({ message: 'Document deleted successfully.' });
-            }
-          });
-        }
-      },
-    });
-  } catch (error) {
-    logger.error('Error deleting document:', error);
     res.status(500).json({
       message: 'Server error',
       error: error.message,

@@ -102,11 +102,13 @@ const connectToSnowflake = () => {
   return connectionPromise;
 };
 
-// Add the execute function
+// Updated execute function to return a Promise and support async/await
 const execute = (options) => {
   if (!connection) {
     throw new Error('Database connection is not established.');
   }
+
+  console.log(`Executing SQL query: ${options.sqlText} with binds: ${options.binds}`);
 
   return new Promise((resolve, reject) => {
     connection.execute({
