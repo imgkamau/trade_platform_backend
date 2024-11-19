@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { body, validationResult } = require('express-validator');
+const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid'); // Import the uuid module
 
 // Authentication and Authorization middleware
@@ -42,6 +43,41 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET: Retrieve products for the authenticated seller
+router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) => {
+  logger.info('Entered GET /api/products/seller route');
+
+  try {
+    const sellerId = req.user.id; // Assuming the seller's ID is stored in req.user.id
+    logger.info(`Fetching products for seller ID: ${sellerId}`);
+
+    const products = await db.execute({
+      sqlText: `
+        SELECT 
+          PRODUCT_ID,
+          NAME,
+          DESCRIPTION,
+          PRICE,
+          STOCK,
+          CATEGORY,
+          UPDATED_AT
+        FROM trade.gwtrade.Products
+        WHERE SELLER_ID = ?
+        ORDER BY UPDATED_AT DESC
+      `,
+      binds: [sellerId],
+    });
+
+    logger.info(`Fetched ${products.length} products for seller ID: ${sellerId}`);
+    res.json(products);
+  } catch (error) {
+    logger.error('Error fetching seller products:', error);
+    res.status(500).json({
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+});
 // POST /api/products - Create a new product (Sellers only)
 router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
   const { NAME, DESCRIPTION, PRICE, STOCK } = req.body;
