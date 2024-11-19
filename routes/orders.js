@@ -5,7 +5,7 @@ const router = express.Router();
 const db = require('../db'); // Snowflake database module
 const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
-// Removed unnecessary import of conversationsRouter as we'll handle conversations directly
+const logger = require('../utils/logger');
 
 // Place a new order (Buyers only)
 router.post('/', authMiddleware, async (req, res) => {
@@ -34,10 +34,6 @@ router.post('/', authMiddleware, async (req, res) => {
     for (const item of items) {
       const { productName, quantity } = item;
 
-      console.log('Processing item:', item);
-      console.log('Product Name:', productName);
-      console.log('Quantity:', quantity);
-
       // Validate productName and quantity
       if (!productName || typeof productName !== 'string') {
         throw new Error('Invalid product name');
@@ -51,8 +47,6 @@ router.post('/', authMiddleware, async (req, res) => {
         sqlText: `SELECT * FROM trade.gwtrade.PRODUCTS WHERE NAME = ?`,
         binds: [productName],
       });
-
-      console.log('Product Result:', productResult);
 
       if (!productResult || productResult.length === 0) {
         throw new Error(`Product with name "${productName}" not found`);
@@ -69,19 +63,12 @@ router.post('/', authMiddleware, async (req, res) => {
       const productId = product.PRODUCT_ID;
       const sellerId = product.SELLER_ID;
 
-      console.log('Product ID:', productId);
-      console.log('Seller ID:', sellerId);
-
       if (product.STOCK < quantity) {
         throw new Error(`Insufficient stock for product ${product.NAME}`);
       }
 
       const itemTotal = product.PRICE * quantity;
       totalAmount += itemTotal;
-
-      console.log('Updating product stock...');
-      console.log('Quantity:', quantity);
-      console.log('Product ID:', productId);
 
       // Update product stock
       await db.execute({
@@ -91,13 +78,6 @@ router.post('/', authMiddleware, async (req, res) => {
 
       // Insert order item
       const ORDER_ITEM_ID = uuidv4();
-      console.log('Inserting order item...');
-      console.log('ORDER_ITEM_ID:', ORDER_ITEM_ID);
-      console.log('ORDER_ID:', ORDER_ID);
-      console.log('Product ID:', productId);
-      console.log('Product Name:', productName);
-      console.log('Quantity:', quantity);
-      console.log('Price:', product.PRICE);
 
       await db.execute({
         sqlText: `
@@ -119,11 +99,6 @@ router.post('/', authMiddleware, async (req, res) => {
         sellerProductMap.set(key, { sellerId, productId });
       }
     }
-
-    console.log('Creating order...');
-    console.log('ORDER_ID:', ORDER_ID);
-    console.log('Buyer ID:', buyerId);
-    console.log('Total Amount:', totalAmount);
 
     // Create order
     await db.execute({
@@ -151,7 +126,6 @@ router.post('/', authMiddleware, async (req, res) => {
       });
 
       if (existingConversation && existingConversation.length > 0) {
-        console.log(`Conversation already exists between buyer ${buyerId} and seller ${sellerId} for product ${productId}`);
         continue; // Skip creating a new conversation
       }
 
@@ -164,8 +138,6 @@ router.post('/', authMiddleware, async (req, res) => {
         `,
         binds: [conversationId, sellerId, buyerId, productId],
       });
-
-      console.log(`Created new conversation: ${conversationId} between buyer ${buyerId} and seller ${sellerId} for product ${productId}`);
     }
 
     // Commit transaction
@@ -181,7 +153,7 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // GET all orders
-router.get('/', authMiddleware, async (req, res) => { // Added authMiddleware to protect route
+router.get('/', authMiddleware, async (req, res) => {
   const userId = req.user.id;
   const role = req.user.role;
 
@@ -217,6 +189,7 @@ router.get('/', authMiddleware, async (req, res) => { // Added authMiddleware to
           SELECT 
             o.ORDER_ID,
             o.BUYER_ID,
+            u.FULL_NAME AS BUYER_NAME,
             o.TOTAL_AMOUNT,
             o.CREATED_AT,
             oi.ORDER_ITEM_ID,
@@ -227,6 +200,7 @@ router.get('/', authMiddleware, async (req, res) => { // Added authMiddleware to
           FROM trade.gwtrade.ORDERS o
           JOIN trade.gwtrade.ORDER_ITEMS oi ON o.ORDER_ID = oi.ORDER_ID
           JOIN trade.gwtrade.PRODUCTS p ON oi.PRODUCT_ID = p.PRODUCT_ID
+          JOIN trade.gwtrade.USERS u ON o.BUYER_ID = u.USER_ID
           WHERE p.SELLER_ID = ?
           ORDER BY o.CREATED_AT DESC
         `,
