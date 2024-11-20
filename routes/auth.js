@@ -25,11 +25,15 @@ router.post(
     body('email').isEmail().withMessage('Valid email is required'),
     body('full_name').notEmpty().withMessage('Full name is required'),
     body('role')
-      .isIn(['exporter', 'buyer'])
-      .withMessage('Role must be either exporter or buyer'),
-    body('company_name').optional().trim(),
-    body('phone_number').optional().trim(),
-    body('address').optional().trim(),
+      .isIn(['seller', 'buyer'])
+      .withMessage('Role must be either seller or buyer'),
+    body('company_name').notEmpty().withMessage('Company name is required').trim(),
+    body('company_description')
+      .notEmpty()
+      .withMessage('Company description is required')
+      .trim(),
+    body('phone_number').notEmpty().withMessage('Phone number is required').trim(),
+    body('address').notEmpty().withMessage('Address is required').trim(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -44,6 +48,7 @@ router.post(
       full_name,
       role,
       company_name,
+      company_description,
       phone_number,
       address,
     } = req.body;
@@ -66,8 +71,17 @@ router.post(
 
       const insertUserSql = `
         INSERT INTO trade.gwtrade.USERS (
-          USER_ID, USERNAME, PASSWORD_HASH, EMAIL, FULL_NAME, ROLE, COMPANY_NAME, PHONE_NUMBER, ADDRESS
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          USER_ID,
+          USERNAME,
+          PASSWORD_HASH,
+          EMAIL,
+          FULL_NAME,
+          ROLE,
+          COMPANY_NAME,
+          COMPANY_DESCRIPTION,
+          PHONE_NUMBER,
+          ADDRESS
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       logger.info('Executing SQL:', insertUserSql);
       await db.execute({
@@ -79,9 +93,10 @@ router.post(
           email,
           full_name,
           role,
-          company_name || null,
-          phone_number || null,
-          address || null,
+          company_name,
+          company_description,
+          phone_number,
+          address,
         ],
       });
 
