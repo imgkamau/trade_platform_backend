@@ -11,6 +11,10 @@ const { v4: uuidv4 } = require('uuid'); // Import the uuid module
 const authMiddleware = require('../middleware/auth'); // Authentication middleware
 const authorize = require('../middleware/authorize'); // Authorization middleware
 
+// Optional: Caching (if needed)
+const NodeCache = require('node-cache');
+const cache = new NodeCache({ stdTTL: 300 }); // Cache for 5 minutes
+
 // GET /api/products - Public 
 router.get('/', async (req, res) => {
   console.log('Received GET request to /api/products');
@@ -78,6 +82,7 @@ router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) =>
     });
   }
 });
+
 // POST /api/products - Create a new product (Sellers only)
 router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
   const { NAME, DESCRIPTION, PRICE, STOCK } = req.body;
@@ -94,7 +99,7 @@ router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
     // Insert the new product into the database
     await db.execute({
       sqlText: `
-        INSERT INTO PRODUCTS (PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID)
+        INSERT INTO trade.gwtrade.PRODUCTS (PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID)
         VALUES (?, ?, ?, ?, ?, ?)
       `,
       binds: [PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID],
@@ -116,7 +121,7 @@ router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res
   try {
     // Check if the product exists and belongs to the seller
     const productResult = await db.execute({
-      sqlText: `SELECT * FROM PRODUCTS WHERE PRODUCT_ID = ? AND SELLER_ID = ?`,
+      sqlText: `SELECT * FROM trade.gwtrade.PRODUCTS WHERE PRODUCT_ID = ? AND SELLER_ID = ?`,
       binds: [productId, sellerId],
     });
 
@@ -129,7 +134,7 @@ router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res
 
     // Update the product
     await db.execute({
-      sqlText: `UPDATE PRODUCTS SET
+      sqlText: `UPDATE trade.gwtrade.PRODUCTS SET
         NAME = COALESCE(?, NAME),
         DESCRIPTION = COALESCE(?, DESCRIPTION),
         CATEGORY = COALESCE(?, CATEGORY),
@@ -155,7 +160,7 @@ router.delete('/:productId', authMiddleware, authorize(['exporter']), async (req
   try {
     // Check if the product exists and belongs to the seller
     const productResult = await db.execute({
-      sqlText: `SELECT * FROM PRODUCTS WHERE PRODUCT_ID = ? AND SELLER_ID = ?`,
+      sqlText: `SELECT * FROM trade.gwtrade.PRODUCTS WHERE PRODUCT_ID = ? AND SELLER_ID = ?`,
       binds: [productId, sellerId],
     });
 
@@ -165,13 +170,92 @@ router.delete('/:productId', authMiddleware, authorize(['exporter']), async (req
 
     // Delete the product
     await db.execute({
-      sqlText: `DELETE FROM PRODUCTS WHERE PRODUCT_ID = ?`,
+      sqlText: `DELETE FROM trade.gwtrade.PRODUCTS WHERE PRODUCT_ID = ?`,
       binds: [productId],
     });
 
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     console.error('Error deleting product:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Public Route: Get Sellers for a Specific Product
+router.get('/:productId/sellers', async (req, res) => { // Removed authMiddleware and authorize
+  const { productId } = req.params;
+  logger.info(`Fetching sellers for product ID: ${productId}`);
+
+  try {
+    // Verify if the product exists
+    const productResult = await db.execute({
+      sqlText: `
+        SELECT 
+          PRODUCT_ID,
+          NAME,
+          DESCRIPTION,
+          CATEGORY
+        FROM trade.gwtrade.PRODUCTS
+        WHERE PRODUCT_ID = ?
+      `,
+      binds: [productId],
+    });
+
+    if (productResult.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // Optional: Check cache first
+    const cachedData = cache.get(`product_sellers_${productId}`);
+    if (cachedData) {
+      logger.info(`Cache hit for product ID: ${productId}`);
+      return res.json(cachedData);
+    }
+
+    // Fetch sellers offering this product
+    const sellersResult = await db.execute({
+      sqlText: `
+        SELECT 
+          sp.SELLER_PRODUCT_ID,
+          u.USER_ID AS SELLER_ID,
+          u.FULL_NAME AS SELLER_NAME,
+          u.COMPANY_NAME,
+          u.COMPANY_DESCRIPTION,
+          u.PHONE_NUMBER,
+          u.ADDRESS,
+          sp.PRICE,
+          sp.STOCK
+        FROM trade.gwtrade.SELLER_PRODUCTS sp
+        JOIN trade.gwtrade.USERS u ON sp.SELLER_ID = u.USER_ID
+        WHERE sp.PRODUCT_ID = ?
+        ORDER BY sp.PRICE ASC
+      `,
+      binds: [productId],
+    });
+
+    // Format the sellers' data
+    const sellers = sellersResult.map((seller) => ({
+      id: seller.SELLER_ID,
+      name: seller.SELLER_NAME,
+      companyName: seller.COMPANY_NAME,
+      companyDescription: seller.COMPANY_DESCRIPTION,
+      phoneNumber: seller.PHONE_NUMBER,
+      address: seller.ADDRESS,
+      price: `$${seller.PRICE.toFixed(2)}/kg`,
+      stock: seller.STOCK,
+    }));
+
+    const responseData = {
+      product: productResult[0],
+      sellers,
+    };
+
+    // Store in cache
+    cache.set(`product_sellers_${productId}`, responseData);
+
+    res.json(responseData);
+  } catch (error) {
+    logger.error('Error fetching sellers for product:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

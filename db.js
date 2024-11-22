@@ -51,6 +51,7 @@ const connectToSnowflake = () => {
       const SNOWFLAKE_DATABASE = getEnvVariable('SNOWFLAKE_DATABASE');
       const SNOWFLAKE_SCHEMA = getEnvVariable('SNOWFLAKE_SCHEMA');
       const SNOWFLAKE_ROLE = process.env.SNOWFLAKE_ROLE ? process.env.SNOWFLAKE_ROLE.trim() : undefined;
+      
 
       // Create a connection using environment variables
       connection = snowflake.createConnection({
@@ -58,6 +59,7 @@ const connectToSnowflake = () => {
         username: SNOWFLAKE_USERNAME,
         password: SNOWFLAKE_PASSWORD,
         role: SNOWFLAKE_ROLE,
+        timezone: 'UTC', // Ensure timezone is set to UTC
         // Note: We're not setting warehouse, database, or schema here
       });
 
@@ -86,7 +88,76 @@ const connectToSnowflake = () => {
             await executeSql(conn, "ALTER SESSION SET BINARY_OUTPUT_FORMAT = 'HEX'");
             console.log('BINARY_OUTPUT_FORMAT set to HEX');
 
-            resolve(connection);
+            // Verify Timezone Parameter
+            try {
+              const timezoneRows = await new Promise((resolve, reject) => {
+                conn.execute({
+                  sqlText: "SHOW PARAMETERS LIKE 'TIMEZONE';",
+                  complete: (err, stmt, rows) => {
+                    if (err) {
+                      console.error('Error executing SHOW PARAMETERS:', err);
+                      return reject(err);
+                    }
+                    resolve(rows);
+                  },
+                });
+              });
+
+              console.log('Timezone Rows:', timezoneRows);
+
+              // Correct property names: key and value
+              const timezoneRow = timezoneRows.find(row => row.key === 'TIMEZONE');
+
+              if (!timezoneRow) {
+                throw new Error('TIMEZONE parameter not found in Snowflake session.');
+              }
+
+              console.log(`Snowflake Session Timezone: ${timezoneRow.value}`);
+
+              if (timezoneRow.value !== 'UTC') {
+                console.warn(`Current timezone is ${timezoneRow.value}. Attempting to set it to UTC.`);
+                
+                // Set timezone to UTC
+                await executeSql(conn, "ALTER SESSION SET TIMEZONE = 'UTC'");
+                console.log('Session timezone set to UTC.');
+
+                // Re-verify the timezone
+                const updatedTimezoneRows = await new Promise((resolve, reject) => {
+                  conn.execute({
+                    sqlText: "SHOW PARAMETERS LIKE 'TIMEZONE';",
+                    complete: (err, stmt, rows) => {
+                      if (err) {
+                        console.error('Error executing SHOW PARAMETERS:', err);
+                        return reject(err);
+                      }
+                      resolve(rows);
+                    },
+                  });
+                });
+
+                const updatedTimezoneRow = updatedTimezoneRows.find(row => row.key === 'TIMEZONE');
+
+                if (!updatedTimezoneRow) {
+                  throw new Error('TIMEZONE parameter not found after attempting to set it.');
+                }
+
+                console.log(`Updated Snowflake Session Timezone: ${updatedTimezoneRow.value}`);
+
+                if (updatedTimezoneRow.value !== 'UTC') {
+                  throw new Error(`Failed to set session timezone to UTC. Current timezone is ${updatedTimezoneRow.value}.`);
+                } else {
+                  console.log('Session timezone successfully set to UTC.');
+                }
+              } else {
+                console.log('Session timezone is already set to UTC.');
+              }
+
+              resolve(connection);
+            } catch (timezoneError) {
+              console.error('Error verifying or setting TIMEZONE:', timezoneError);
+              reject(timezoneError);
+            }
+
           } catch (error) {
             console.error('Error setting session context:', error);
             reject(error);
@@ -108,13 +179,13 @@ const execute = (options) => {
     throw new Error('Database connection is not established.');
   }
 
-  console.log(`Executing SQL query: ${options.sqlText} with binds: ${options.binds}`);
+  console.log(`Executing SQL query: ${options.sqlText} with binds: ${JSON.stringify(options.binds)}`);
 
   return new Promise((resolve, reject) => {
     connection.execute({
       sqlText: options.sqlText,
-      binds: options.binds,
-      complete: function (err, stmt, rows) {
+      binds: options.binds || [],
+      complete: function (err, stmt, rows) { // Corrected callback parameters
         if (err) {
           console.error(`Error executing query "${options.sqlText}":`, err);
           reject(err);

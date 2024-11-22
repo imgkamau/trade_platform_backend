@@ -22,7 +22,10 @@ const messagesRouter = require('./routes/messages'); // Messages Router
 const inquiriesRouter = require('./routes/inquiries'); // Inquiries Router
 const contactsRouter = require('./routes/contacts'); // Contacts Router
 const scheduler = require('./utils/scheduler'); // Import the scheduler
+const sellerProductsRouter = require('./routes/sellerProducts');
+const helmet = require('helmet'); // For setting various HTTP headers for security
 const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
+const rateLimit = require('express-rate-limit'); // Import express-rate-limit
 
 // Load environment variables from .env file
 dotenv.config();
@@ -44,6 +47,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Security Middleware
+app.use(helmet());
+
 // Setup Morgan to use Winston's stream
 app.use(
   morgan('combined', {
@@ -52,6 +58,19 @@ app.use(
     },
   })
 );
+
+// Define rate limit rules for auth routes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 requests per windowMs
+  message: 'Too many requests from this IP, please try again after 15 minutes',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// Apply rate limiting to auth routes
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
 
 // Refresh Token Route (assumed public)
 app.use(refreshTokenRoute);
@@ -66,11 +85,12 @@ app.use('/api/logistics', logisticsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/shipping', shippingRouter);
 app.use('/api/orders', ordersRouter);
-app.use('/api/messages', messagesRouter);
+app.use('/api/messages', messagesRouter); // Messages Router
 app.use('/api/analytics', analyticsRouter);
-app.use('/api/messages', messagesRouter); // Register Messages Router
 app.use('/api/inquiries', inquiriesRouter);
 app.use('/api/contacts', contactsRouter);
+// Use the seller-products router
+app.use('/api/seller-products', sellerProductsRouter);
 
 // Root Route
 app.get('/', (req, res) => {
