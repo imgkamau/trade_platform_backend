@@ -32,6 +32,9 @@ dotenv.config();
 
 const app = express();
 
+// **1. Set Trust Proxy**
+app.set('trust proxy', 1); // Trust the first proxy
+
 // CORS configuration
 const corsOptions = {
   origin:

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { execute } = require('../db'); // Ensure this is the updated db.js with proper execute function
+const db = require('../db'); // Snowflake connection
 const { body, validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -72,7 +72,6 @@ router.post(
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Registration validation failed', { errors: errors.array() });
       return sendErrorResponse(res, 400, 'Validation failed', errors.array());
     }
 
@@ -91,14 +90,13 @@ router.post(
     try {
       // Check if username already exists
       const checkUserSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
-      logger.info('Executing SQL:', { sql: checkUserSql, binds: [username] });
-      const existingUserResult = await execute({
+      logger.info('Executing SQL:', checkUserSql);
+      const existingUserResult = await db.execute({
         sqlText: checkUserSql,
         binds: [username],
       });
 
       if (existingUserResult && existingUserResult.length > 0) {
-        logger.info(`Username already exists: ${username}`);
         return sendErrorResponse(res, 400, 'Username already exists');
       }
 
@@ -122,8 +120,8 @@ router.post(
           ADDRESS
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-      logger.info('Executing SQL:', { sql: insertUserSql, binds: [USER_ID, username, hashedPassword, email, full_name, role, company_name, company_description, phone_number, address] });
-      await execute({
+      logger.info('Executing SQL:', insertUserSql);
+      await db.execute({
         sqlText: insertUserSql,
         binds: [
           USER_ID,
@@ -139,12 +137,10 @@ router.post(
         ],
       });
 
-      logger.info(`User registered successfully: ${username}`);
-
       res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
       logger.error('Registration error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: 'Internal server error' }]);
+      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
     }
   }
 );
@@ -163,7 +159,6 @@ router.post(
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Login validation failed', { errors: errors.array() });
       return sendErrorResponse(res, 400, 'Validation failed', errors.array());
     }
 
@@ -172,21 +167,19 @@ router.post(
     try {
       // Fetch user from Snowflake
       const loginSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
-      logger.info('Executing SQL:', { sql: loginSql, binds: [username] });
-      const userResult = await execute({
+      logger.info('Executing SQL:', loginSql);
+      const userResult = await db.execute({
         sqlText: loginSql,
         binds: [username],
       });
 
       if (!userResult || userResult.length === 0) {
-        logger.info(`Invalid credentials attempt for username: ${username}`);
         return sendErrorResponse(res, 400, 'Invalid credentials');
       }
 
       const user = userResult[0];
       const isMatch = await bcrypt.compare(password, user.PASSWORD_HASH);
       if (!isMatch) {
-        logger.info(`Invalid credentials attempt for username: ${username}`);
         return sendErrorResponse(res, 400, 'Invalid credentials');
       }
 
@@ -211,7 +204,7 @@ router.post(
       );
     } catch (error) {
       logger.error('Login error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: 'Internal server error' }]);
+      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
     }
   }
 );
@@ -242,8 +235,8 @@ router.post(
     try {
       // Check if user exists
       const checkUserSql = 'SELECT USER_ID, EMAIL FROM trade.gwtrade.USERS WHERE EMAIL = ?';
-      logger.info('Executing SQL:', { sql: checkUserSql, binds: [email] });
-      const userResult = await execute({
+      logger.info('Executing SQL:', checkUserSql);
+      const userResult = await db.execute({
         sqlText: checkUserSql,
         binds: [email],
       });
@@ -263,19 +256,19 @@ router.post(
       const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
       const resetTokenExpiry = new Date(Date.now() + 24 * 3600000).toISOString(); // 24 hours from now in UTC
 
-      // Update user record with hashed reset token and expiry
+      // Update user record with reset token and expiry
       const updateUserSql = `
         UPDATE trade.gwtrade.USERS
         SET RESET_PASSWORD_TOKEN = ?, RESET_PASSWORD_EXPIRES = ?
         WHERE USER_ID = ?
       `;
-      logger.info('Executing SQL:', { sql: updateUserSql, binds: [resetTokenHash, resetTokenExpiry, userId] });
-      await execute({
+      logger.info('Executing SQL:', updateUserSql);
+      await db.execute({
         sqlText: updateUserSql,
         binds: [resetTokenHash, resetTokenExpiry, userId],
       });
 
-      // Create reset URL with raw token
+      // Create reset URL
       const resetUrl = `https://www.ke-eutrade.org/reset-password?token=${resetToken}&id=${userId}`;
 
       // Email content
@@ -283,13 +276,7 @@ router.post(
         from: process.env.EMAIL_FROM || '"Support" <support@example.com>', // sender address
         to: user.EMAIL, // list of receivers
         subject: 'Password Reset Request',
-        text: `You have requested to reset your password.
-
-Please click the link below to reset your password:
-
-${resetUrl}
-
-If you did not request this, please ignore this email.`,
+        text: `You have requested to reset your password.\n\nPlease click the link below to reset your password:\n\n${resetUrl}\n\nIf you did not request this, please ignore this email.`,
         html: `
           <p>You have requested to reset your password.</p>
           <p>Please click the link below to reset your password:</p>
@@ -306,7 +293,7 @@ If you did not request this, please ignore this email.`,
       res.status(200).json({ message: 'Password reset email sent' });
     } catch (error) {
       logger.error('Forgot password error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: 'Internal server error' }]);
+      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
     }
   }
 );
@@ -355,7 +342,7 @@ router.post(
 
       logger.info('Password Reset Attempt:', {
         userId: id,
-        // Do not log the hashed token to avoid exposing sensitive data
+        resetTokenHash: resetTokenHash,
       });
 
       // Query to find the user with the matching reset token and unexpired
@@ -364,8 +351,11 @@ router.post(
         FROM trade.gwtrade.USERS
         WHERE USER_ID = ? AND RESET_PASSWORD_TOKEN = ? AND RESET_PASSWORD_EXPIRES > CURRENT_TIMESTAMP()
       `;
-      logger.info('Executing SQL Query for Token Validation:', { sql: checkTokenSql, binds: [id, resetTokenHash] });
-      const userResult = await execute({
+      logger.info('Executing SQL Query for Token Validation:', {
+        sql: checkTokenSql,
+        binds: [id, resetTokenHash],
+      });
+      const userResult = await db.execute({
         sqlText: checkTokenSql,
         binds: [id, resetTokenHash],
       });
@@ -394,8 +384,11 @@ router.post(
         SET PASSWORD_HASH = ?, RESET_PASSWORD_TOKEN = NULL, RESET_PASSWORD_EXPIRES = NULL
         WHERE USER_ID = ?
       `;
-      logger.info('Executing SQL Query to Update Password:', { sql: updatePasswordSql, binds: [hashedPassword, userId] });
-      await execute({
+      logger.info('Executing SQL Query to Update Password:', {
+        sql: updatePasswordSql,
+        binds: [hashedPassword, userId],
+      });
+      await db.execute({
         sqlText: updatePasswordSql,
         binds: [hashedPassword, userId],
       });
@@ -427,7 +420,7 @@ Support Team`,
       res.status(200).json({ message: 'Password has been reset successfully' });
     } catch (error) {
       logger.error('Reset password error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: 'Internal server error' }]);
+      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
     }
   }
 );
