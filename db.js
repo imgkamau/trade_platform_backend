@@ -1,11 +1,10 @@
 // db.js
 
 const snowflake = require('snowflake-sdk');
-const logger = require('./utils/logger'); // Use your logger utility
-require('dotenv').config({ path: '.env' });
+const logger = require('./utils/logger'); // Adjust the path to your logger utility if necessary
 
-let connection;
-let connectionPromise; // To store the promise of the ongoing connection attempt
+let connection = null;
+let connectionPromise = null;
 
 // Helper function to get and validate environment variables
 const getEnvVariable = (varName) => {
@@ -16,32 +15,16 @@ const getEnvVariable = (varName) => {
   return value.trim();
 };
 
-// Helper function to execute a SQL command
-const executeSql = (conn, sqlText) => {
-  return new Promise((resolve, reject) => {
-    conn.execute({
-      sqlText,
-      complete: function (err) {
-        if (err) {
-          logger.error(`Error executing "${sqlText}":`, err);
-          reject(err);
-        } else {
-          resolve();
-        }
-      },
-    });
-  });
-};
-
+// Function to establish a connection to Snowflake
 const connectToSnowflake = () => {
-  if (connection) {
+  if (connection && connection.isUp()) {
     return Promise.resolve(connection);
   }
 
   if (connectionPromise) {
     return connectionPromise;
   }
-//see what to remove, or keep
+
   connectionPromise = new Promise(async (resolve, reject) => {
     try {
       // Get and validate environment variables inside the function
@@ -66,7 +49,7 @@ const connectToSnowflake = () => {
       // Connect to Snowflake
       connection.connect(async (err, conn) => {
         if (err) {
-          logger.error('Unable to connect:', err.message);
+          logger.error('Unable to connect to Snowflake:', err.message);
           // Reset connection variables
           connection = null;
           connectionPromise = null;
@@ -91,88 +74,11 @@ const connectToSnowflake = () => {
             await executeSql(conn, "ALTER SESSION SET BINARY_OUTPUT_FORMAT = 'HEX'");
             logger.info('BINARY_OUTPUT_FORMAT set to HEX');
 
-            // Verify Timezone Parameter
-            try {
-              const timezoneRows = await new Promise((resolve, reject) => {
-                conn.execute({
-                  sqlText: "SHOW PARAMETERS LIKE 'TIMEZONE';",
-                  complete: (err, stmt, rows) => {
-                    if (err) {
-                      logger.error('Error executing SHOW PARAMETERS:', err);
-                      return reject(err);
-                    }
-                    resolve(rows);
-                  },
-                });
-              });
+            // Set timezone to UTC
+            await executeSql(conn, "ALTER SESSION SET TIMEZONE = 'UTC'");
+            logger.info('Session timezone set to UTC.');
 
-              logger.debug('Timezone Rows:', timezoneRows);
-
-              // Correct property names: key and value
-              const timezoneRow = timezoneRows.find(
-                row => row.key === 'TIMEZONE' || row.KEY === 'TIMEZONE'
-              );
-
-              if (!timezoneRow) {
-                throw new Error('TIMEZONE parameter not found in Snowflake session.');
-              }
-
-              const timezoneValue = timezoneRow.value || timezoneRow.VALUE;
-
-              logger.info(`Snowflake Session Timezone: ${timezoneValue}`);
-
-              if (timezoneValue !== 'UTC') {
-                logger.warn(`Current timezone is ${timezoneValue}. Attempting to set it to UTC.`);
-
-                // Set timezone to UTC
-                await executeSql(conn, "ALTER SESSION SET TIMEZONE = 'UTC'");
-                logger.info('Session timezone set to UTC.');
-
-                // Re-verify the timezone
-                const updatedTimezoneRows = await new Promise((resolve, reject) => {
-                  conn.execute({
-                    sqlText: "SHOW PARAMETERS LIKE 'TIMEZONE';",
-                    complete: (err, stmt, rows) => {
-                      if (err) {
-                        logger.error('Error executing SHOW PARAMETERS:', err);
-                        return reject(err);
-                      }
-                      resolve(rows);
-                    },
-                  });
-                });
-
-                const updatedTimezoneRow = updatedTimezoneRows.find(
-                  row => row.key === 'TIMEZONE' || row.KEY === 'TIMEZONE'
-                );
-
-                if (!updatedTimezoneRow) {
-                  throw new Error('TIMEZONE parameter not found after attempting to set it.');
-                }
-
-                const updatedTimezoneValue = updatedTimezoneRow.value || updatedTimezoneRow.VALUE;
-
-                logger.info(`Updated Snowflake Session Timezone: ${updatedTimezoneValue}`);
-
-                if (updatedTimezoneValue !== 'UTC') {
-                  throw new Error(
-                    `Failed to set session timezone to UTC. Current timezone is ${updatedTimezoneValue}.`
-                  );
-                } else {
-                  logger.info('Session timezone successfully set to UTC.');
-                }
-              } else {
-                logger.info('Session timezone is already set to UTC.');
-              }
-
-              resolve(connection);
-            } catch (timezoneError) {
-              logger.error('Error verifying or setting TIMEZONE:', timezoneError);
-              // Reset connection variables
-              connection = null;
-              connectionPromise = null;
-              reject(timezoneError);
-            }
+            resolve(connection);
           } catch (error) {
             logger.error('Error setting session context:', error);
             // Reset connection variables
@@ -183,7 +89,7 @@ const connectToSnowflake = () => {
         }
       });
     } catch (error) {
-      logger.error('Error setting up connection:', error);
+      logger.error('Error setting up Snowflake connection:', error);
       // Reset connection variables
       connection = null;
       connectionPromise = null;
@@ -194,7 +100,24 @@ const connectToSnowflake = () => {
   return connectionPromise;
 };
 
-// Updated execute function to return a Promise and support async/await
+// Helper function to execute a SQL command without returning results
+const executeSql = (conn, sqlText) => {
+  return new Promise((resolve, reject) => {
+    conn.execute({
+      sqlText,
+      complete: function (err) {
+        if (err) {
+          logger.error(`Error executing "${sqlText}":`, err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      },
+    });
+  });
+};
+
+// Function to execute queries
 const execute = async (options) => {
   try {
     const conn = await connectToSnowflake();
