@@ -1,8 +1,11 @@
 // index.js
 
 const express = require('express');
-const cors = require('cors');
+const helmet = require('helmet'); // For setting various HTTP headers for security
+const rateLimit = require('express-rate-limit'); // Import express-rate-limit
 const morgan = require('morgan');
+const cors = require('cors');
+const serverless = require('serverless-http'); // To wrap Express for serverless
 const dotenv = require('dotenv');
 const logger = require('./utils/logger');
 const refreshTokenRoute = require('./routes/refreshToken');
@@ -23,37 +26,42 @@ const inquiriesRouter = require('./routes/inquiries'); // Inquiries Router
 const contactsRouter = require('./routes/contacts'); // Contacts Router
 const scheduler = require('./utils/scheduler'); // Import the scheduler
 const sellerProductsRouter = require('./routes/sellerProducts');
-const helmet = require('helmet'); // For setting various HTTP headers for security
 const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
-const rateLimit = require('express-rate-limit'); // Import express-rate-limit
 
-// Load environment variables from .env file
-dotenv.config();
+// Load environment variables from the appropriate .env file
+const env = process.env.NODE_ENV || 'development';
+dotenv.config({ path: `.env.${env}` });
 
 const app = express();
 
 // **1. Set Trust Proxy**
-app.set('trust proxy', 1); // Trust the first proxy
+app.set('trust proxy', 1); // Trust the first proxy (Vercel)
 
-// CORS configuration
+// **2. CORS Configuration**
 const corsOptions = {
   origin:
-    process.env.NODE_ENV === 'production'
+    env === 'production'
       ? process.env.FRONTEND_URL || 'https://ke-eutrade.org'
       : process.env.FRONTEND_URL || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  optionsSuccessStatus: 204,
+  credentials: true, // Allow cookies and other credentials
+  optionsSuccessStatus: 204, // Some legacy browsers choke on 204
 };
 
+// Apply CORS Middleware
 app.use(cors(corsOptions));
+
+// **3. Handle Preflight OPTIONS Requests**
+app.options('*', cors(corsOptions));
+
+// **4. JSON Parsing Middleware**
 app.use(express.json());
 
-// Security Middleware
+// **5. Security Middleware**
 app.use(helmet());
 
-// Setup Morgan to use Winston's stream
+// **6. Logging Middleware**
 app.use(
   morgan('combined', {
     stream: {
@@ -62,7 +70,7 @@ app.use(
   })
 );
 
-// Define rate limit rules for auth routes
+// **7. Rate Limiting for Auth Routes**
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // Limit each IP to 10 requests per windowMs
@@ -71,14 +79,11 @@ const authLimiter = rateLimit({
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 
-// Apply rate limiting to auth routes
+// Apply rate limiting to specific auth routes
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 
-// Refresh Token Route (assumed public)
-app.use(refreshTokenRoute);
-
-// Public Routes
+// **8. Mount Routers**
 app.use('/api/auth', authRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/checklists', checklistsRouter);
@@ -92,49 +97,51 @@ app.use('/api/messages', messagesRouter); // Messages Router
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/inquiries', inquiriesRouter);
 app.use('/api/contacts', contactsRouter);
-// Use the seller-products router
 app.use('/api/seller-products', sellerProductsRouter);
 
-// Root Route
+// **9. Root Route**
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');
 });
 
-// Health Check Route
+// **10. Health Check Route**
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK' });
 });
 
-// Catch-all route for undefined routes
+// **11. Catch-all Route for Undefined Routes**
 app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// Error Handling Middleware (Should be after all other routes)
+// **12. Error Handling Middleware (Should be after all other routes)**
 app.use(errorHandler);
 
-// Start the server after establishing database connection
-const PORT = process.env.PORT || 5000;
+// **13. Export as Serverless Function and Start Server Locally**
+if (env !== 'production') {
+  // **14. Start the Server Locally**
+  const PORT = process.env.PORT || 5000;
 
-// Use an async IIFE to handle async operations at the top level
-(async () => {
-  try {
-    // Establish database connection
-    await connectToSnowflake();
-    logger.info('Database connection established.');
+  // Use an async IIFE to handle async operations at the top level
+  (async () => {
+    try {
+      // Establish database connection
+      await connectToSnowflake();
+      logger.info('Database connection established.');
 
-    // Start the server
-    app.listen(PORT, '0.0.0.0', () => {
-      logger.info(`Server running on port ${PORT}`);
-    });
+      // Start the server
+      app.listen(PORT, '0.0.0.0', () => {
+        logger.info(`Server running on port ${PORT}`);
+      });
 
-    // Start the scheduler after successful DB connection
-    scheduler();
-  } catch (error) {
-    logger.error(`Failed to connect to database: ${error.message}`);
-    process.exit(1); // Exit the application with an error code
-  }
-})();
+      // Start the scheduler after successful DB connection
+      scheduler();
+    } catch (error) {
+      logger.error(`Failed to connect to database: ${error.message}`);
+      process.exit(1); // Exit the application with an error code
+    }
+  })();
+}
 
-// For testing purposes
-module.exports = app;
+// **15. Export Handler for Serverless Deployment**
+module.exports.handler = serverless(app);
