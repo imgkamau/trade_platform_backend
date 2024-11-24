@@ -1,12 +1,16 @@
 // index.js
-
+// Load environment variables from the appropriate .env file
+const dotenv = require('dotenv');
+const env = process.env.NODE_ENV || 'development';
+if (env !== 'production') {
+  dotenv.config({ path: `.env.${env}` });
+}
 const express = require('express');
 const helmet = require('helmet'); // For setting various HTTP headers for security
 const rateLimit = require('express-rate-limit'); // Import express-rate-limit
 const morgan = require('morgan');
 const cors = require('cors');
 const serverless = require('serverless-http'); // To wrap Express for serverless
-const dotenv = require('dotenv');
 const logger = require('./utils/logger');
 const refreshTokenRoute = require('./routes/refreshToken');
 const authRouter = require('./routes/auth');
@@ -24,14 +28,15 @@ const analyticsRouter = require('./routes/analytics');
 const messagesRouter = require('./routes/messages'); // Messages Router
 const inquiriesRouter = require('./routes/inquiries'); // Inquiries Router
 const contactsRouter = require('./routes/contacts'); // Contacts Router
+const scheduler = require('./utils/scheduler'); // Import the scheduler
 const sellerProductsRouter = require('./routes/sellerProducts');
-const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
-
-// Load environment variables from the appropriate .env file
-const env = process.env.NODE_ENV || 'development';
+//const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
+// Conditionally import connectToSnowflake
+let connectToSnowflake;
 if (env !== 'production') {
-  dotenv.config({ path: `.env.${env}` });
+  ({ connectToSnowflake } = require('./db'));
 }
+
 
 const app = express();
 
@@ -75,8 +80,7 @@ app.use(
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // Limit each IP to 10 requests per windowMs
-  message:
-    'Too many requests from this IP, please try again after 15 minutes',
+  message: 'Too many requests from this IP, please try again after 15 minutes',
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
@@ -85,25 +89,7 @@ const authLimiter = rateLimit({
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 
-// **8. Middleware to Ensure Database Connection**
-let isDbConnected = false;
-
-app.use(async (req, res, next) => {
-  if (!isDbConnected) {
-    logger.info('Attempting to connect to the database...');
-    try {
-      await connectToSnowflake();
-      isDbConnected = true;
-      logger.info('Database connection established.');
-    } catch (error) {
-      logger.error(`Failed to connect to database: ${error.message}`);
-      return res.status(500).json({ message: 'Database connection failed' });
-    }
-  }
-  next();
-});
-
-// **9. Mount Routers**
+// **8. Mount Routers**
 app.use('/api/auth', authRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/checklists', checklistsRouter);
@@ -119,26 +105,27 @@ app.use('/api/inquiries', inquiriesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/seller-products', sellerProductsRouter);
 
-// **10. Root Route**
+// **9. Root Route**
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');
 });
 
-// **11. Health Check Route**
+// **10. Health Check Route**
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK' });
 });
 
-// **12. Catch-all Route for Undefined Routes**
+// **11. Catch-all Route for Undefined Routes**
 app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// **13. Error Handling Middleware (Should be after all other routes)**
+// **12. Error Handling Middleware (Should be after all other routes)**
 app.use(errorHandler);
 
-// **14. Start the Server Locally (Development Only)**
+// **13. Export as Serverless Function and Start Server Locally**
 if (env !== 'production') {
+  // **14. Start the Server Locally**
   const PORT = process.env.PORT || 5000;
 
   // Use an async IIFE to handle async operations at the top level
@@ -158,6 +145,19 @@ if (env !== 'production') {
     } catch (error) {
       logger.error(`Failed to connect to database: ${error.message}`);
       process.exit(1); // Exit the application with an error code
+    }
+  })();
+} else {
+  // **Production Initialization**
+  (async () => {
+    try {
+      // Establish database connection
+      await connectToSnowflake();
+      logger.info('Database connection established.');
+      // **Do not** start the server or the scheduler in production
+    } catch (error) {
+      logger.error(`Failed to connect to database: ${error.message}`);
+      // **Note:** Avoid exiting the process in serverless environments
     }
   })();
 }

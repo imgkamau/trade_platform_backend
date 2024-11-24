@@ -1,15 +1,11 @@
 // db.js
 
 const snowflake = require('snowflake-sdk');
-const env = process.env.NODE_ENV || 'development';
-if (env !== 'production') {
-  require('dotenv').config({ path: `.env.${env}` });
-}
+const logger = require('./utils/logger'); // Use your logger utility
+require('dotenv').config({ path: '.env' });
 
 let connection;
 let connectionPromise; // To store the promise of the ongoing connection attempt
-
-const logger = require('./utils/logger'); // Use your logger utility
 
 // Helper function to get and validate environment variables
 const getEnvVariable = (varName) => {
@@ -47,17 +43,8 @@ const connectToSnowflake = () => {
   }
 
   connectionPromise = new Promise(async (resolve, reject) => {
-    const timeoutDuration = 5000; // 5 seconds
-    const timeout = setTimeout(() => {
-      logger.error('Snowflake connection timed out.');
-      // Reset connection variables
-      connection = null;
-      connectionPromise = null;
-      reject(new Error('Snowflake connection timed out.'));
-    }, timeoutDuration);
-
     try {
-      // Get and validate environment variables
+      // Get and validate environment variables inside the function
       const SNOWFLAKE_ACCOUNT = getEnvVariable('SNOWFLAKE_ACCOUNT');
       const SNOWFLAKE_USERNAME = getEnvVariable('SNOWFLAKE_USERNAME');
       const SNOWFLAKE_PASSWORD = getEnvVariable('SNOWFLAKE_PASSWORD');
@@ -73,14 +60,13 @@ const connectToSnowflake = () => {
         password: SNOWFLAKE_PASSWORD,
         role: SNOWFLAKE_ROLE,
         timezone: 'UTC', // Ensure timezone is set to UTC
-        // Note: We're not setting warehouse, database, or schema here
+        // Note: Warehouse, database, and schema will be set after connection
       });
 
       // Connect to Snowflake
       connection.connect(async (err, conn) => {
-        clearTimeout(timeout);
         if (err) {
-          logger.error('Unable to connect: ' + err.message);
+          logger.error('Unable to connect:', err.message);
           // Reset connection variables
           connection = null;
           connectionPromise = null;
@@ -120,10 +106,9 @@ const connectToSnowflake = () => {
                 });
               });
 
-              // Log the retrieved rows
               logger.debug('Timezone Rows:', timezoneRows);
 
-              // Correct property names based on Snowflake's response
+              // Correct property names: key and value
               const timezoneRow = timezoneRows.find(
                 row => row.key === 'TIMEZONE' || row.KEY === 'TIMEZONE'
               );
@@ -138,7 +123,7 @@ const connectToSnowflake = () => {
 
               if (timezoneValue !== 'UTC') {
                 logger.warn(`Current timezone is ${timezoneValue}. Attempting to set it to UTC.`);
-                
+
                 // Set timezone to UTC
                 await executeSql(conn, "ALTER SESSION SET TIMEZONE = 'UTC'");
                 logger.info('Session timezone set to UTC.');
@@ -170,7 +155,9 @@ const connectToSnowflake = () => {
                 logger.info(`Updated Snowflake Session Timezone: ${updatedTimezoneValue}`);
 
                 if (updatedTimezoneValue !== 'UTC') {
-                  throw new Error(`Failed to set session timezone to UTC. Current timezone is ${updatedTimezoneValue}.`);
+                  throw new Error(
+                    `Failed to set session timezone to UTC. Current timezone is ${updatedTimezoneValue}.`
+                  );
                 } else {
                   logger.info('Session timezone successfully set to UTC.');
                 }
@@ -186,7 +173,6 @@ const connectToSnowflake = () => {
               connectionPromise = null;
               reject(timezoneError);
             }
-
           } catch (error) {
             logger.error('Error setting session context:', error);
             // Reset connection variables
@@ -197,7 +183,6 @@ const connectToSnowflake = () => {
         }
       });
     } catch (error) {
-      clearTimeout(timeout);
       logger.error('Error setting up connection:', error);
       // Reset connection variables
       connection = null;
@@ -210,27 +195,30 @@ const connectToSnowflake = () => {
 };
 
 // Updated execute function to return a Promise and support async/await
-const execute = (options) => {
-  if (!connection) {
-    throw new Error('Database connection is not established.');
-  }
+const execute = async (options) => {
+  try {
+    const conn = await connectToSnowflake();
 
-  logger.debug(`Executing SQL query: ${options.sqlText} with binds: ${JSON.stringify(options.binds)}`);
+    logger.debug(`Executing SQL query: ${options.sqlText} with binds: ${JSON.stringify(options.binds)}`);
 
-  return new Promise((resolve, reject) => {
-    connection.execute({
-      sqlText: options.sqlText,
-      binds: options.binds || [],
-      complete: function (err, stmt, rows) {
-        if (err) {
-          logger.error(`Error executing query "${options.sqlText}":`, err);
-          reject(err);
-        } else {
-          resolve(rows);
-        }
-      },
+    return new Promise((resolve, reject) => {
+      conn.execute({
+        sqlText: options.sqlText,
+        binds: options.binds || [],
+        complete: function (err, stmt, rows) {
+          if (err) {
+            logger.error(`Error executing query "${options.sqlText}":`, err);
+            reject(err);
+          } else {
+            resolve(rows);
+          }
+        },
+      });
     });
-  });
+  } catch (err) {
+    logger.error('Error in execute function:', err);
+    throw err;
+  }
 };
 
 // Export the execute function and connectToSnowflake
