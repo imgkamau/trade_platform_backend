@@ -6,7 +6,7 @@ const authorize = require('../middleware/authorize');
 const { v4: uuidv4 } = require('uuid'); // Import the uuid module
 
 // Log to confirm the router is loaded
-console.log('Logistics router loaded');
+//console.log('Logistics router loaded');
 
 // POST: Create a new shipment
 router.post('/shipments', authMiddleware, authorize(['seller']), async (req, res) => {

@@ -30,10 +30,11 @@ const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 
 // Load environment variables from the appropriate .env file
 const env = process.env.NODE_ENV || 'development';
-
 if (env !== 'production') {
   dotenv.config({ path: `.env.${env}` });
 }
+
+const app = express();
 
 // **1. Set Trust Proxy**
 app.set('trust proxy', 1); // Trust the first proxy (Vercel)
@@ -140,6 +141,19 @@ if (env !== 'production') {
     } catch (error) {
       logger.error(`Failed to connect to database: ${error.message}`);
       process.exit(1); // Exit the application with an error code
+    }
+  })();
+} else {
+  // **Production Initialization**
+  (async () => {
+    try {
+      // Establish database connection
+      await connectToSnowflake();
+      logger.info('Database connection established.');
+      // **Do not** start the server or the scheduler in production
+    } catch (error) {
+      logger.error(`Failed to connect to database: ${error.message}`);
+      // **Note:** Avoid exiting the process in serverless environments
     }
   })();
 }

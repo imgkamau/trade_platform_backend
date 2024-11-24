@@ -1,7 +1,6 @@
 // config/nodemailer.js
 
 const nodemailer = require('nodemailer');
-require('dotenv').config();
 
 const transporter = nodemailer.createTransport({
   service: 'Gmail', // You can use other services like SendGrid, Mailgun, etc.
