@@ -10,13 +10,13 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Verify the transporter configuration
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Nodemailer configuration error:', error);
-  } else {
-    console.log('Nodemailer is configured correctly.');
-  }
-});
+// Remove or comment out the transporter.verify() call
+// transporter.verify((error, success) => {
+//   if (error) {
+//     console.error('Nodemailer configuration error:', error);
+//   } else {
+//     console.log('Nodemailer is configured correctly.');
+//   }
+// });
 
 module.exports = transporter;
