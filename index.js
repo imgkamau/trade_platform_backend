@@ -36,7 +36,7 @@ let connectToSnowflake;
 if (env !== 'production') {
   ({ connectToSnowflake } = require('./db'));
 }
-
+const verifyCompanyRouter = require('./routes/verifyCompany');
 
 const app = express();
 
@@ -104,6 +104,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/inquiries', inquiriesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/seller-products', sellerProductsRouter);
+app.use('/api', verifyCompanyRouter);
 
 // **9. Root Route**
 app.get('/', (req, res) => {
