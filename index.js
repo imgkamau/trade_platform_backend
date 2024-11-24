@@ -30,9 +30,10 @@ const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 
 // Load environment variables from the appropriate .env file
 const env = process.env.NODE_ENV || 'development';
-dotenv.config({ path: `.env.${env}` });
 
-const app = express();
+if (env !== 'production') {
+  dotenv.config({ path: `.env.${env}` });
+}
 
 // **1. Set Trust Proxy**
 app.set('trust proxy', 1); // Trust the first proxy (Vercel)
