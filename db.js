@@ -41,7 +41,7 @@ const connectToSnowflake = () => {
   if (connectionPromise) {
     return connectionPromise;
   }
-
+//see what to remove, or keep
   connectionPromise = new Promise(async (resolve, reject) => {
     try {
       // Get and validate environment variables inside the function
