@@ -144,4 +144,4 @@ if (env !== 'production') {
 }
 
 // **15. Export Handler for Serverless Deployment**
-module.exports.handler = serverless(app);
+module.exports = serverless(app);
