@@ -3,18 +3,27 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Snowflake connection
-const { body, validationResult } = require('express-validator');
+const { body, validationResult, query } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
-const transporter = require('../config/nodemailer'); // Nodemailer transporter
 const logger = require('../utils/logger'); // Your logger utility
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const nodemailer = require('nodemailer'); // Nodemailer module
 
 // Apply helmet middleware for security
 router.use(helmet());
+
+// Nodemailer transporter configuration
+const transporter = nodemailer.createTransport({
+  service: 'gmail', // Use your email service provider
+  auth: {
+    user: process.env.EMAIL_USER, // Your email address
+    pass: process.env.EMAIL_PASS, // Your email password or app-specific password
+  },
+});
 
 // Helper function for consistent error responses
 const sendErrorResponse = (res, status, message, errors = null) => {
@@ -26,10 +35,10 @@ const sendErrorResponse = (res, status, message, errors = null) => {
 // Rate Limiting for Auth Routes
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 requests per windowMs
+  max: 10, // Limit each IP
   message: 'Too many requests from this IP, please try again after 15 minutes',
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Apply rate limiting to sensitive routes
@@ -37,10 +46,11 @@ router.use('/login', authLimiter);
 router.use('/register', authLimiter);
 router.use('/forgot-password', authLimiter);
 router.use('/reset-password', authLimiter);
+router.use('/verify-email', authLimiter);
 
 /**
  * @route   POST /auth/register
- * @desc    Register a new user
+ * @desc    Register a new user and send verification email
  * @access  Public
  */
 router.post(
@@ -88,22 +98,45 @@ router.post(
     } = req.body;
 
     try {
-      // Check if username already exists
-      const checkUserSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
-      logger.info('Executing SQL:', checkUserSql);
-      const existingUserResult = await db.execute({
-        sqlText: checkUserSql,
+      // Check for username and email uniqueness
+      let validationErrors = [];
+
+      // Check username
+      const checkUsernameSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
+      logger.info('Executing SQL:', checkUsernameSql);
+      const existingUsernameResult = await db.execute({
+        sqlText: checkUsernameSql,
         binds: [username],
       });
 
-      if (existingUserResult && existingUserResult.length > 0) {
-        return sendErrorResponse(res, 400, 'Username already exists');
+      if (existingUsernameResult && existingUsernameResult.length > 0) {
+        validationErrors.push({ msg: 'Username already exists', param: 'username', location: 'body' });
+      }
+
+      // Check email
+      const checkEmailSql = 'SELECT * FROM trade.gwtrade.USERS WHERE EMAIL = ?';
+      logger.info('Executing SQL:', checkEmailSql);
+      const existingEmailResult = await db.execute({
+        sqlText: checkEmailSql,
+        binds: [email],
+      });
+
+      if (existingEmailResult && existingEmailResult.length > 0) {
+        validationErrors.push({ msg: 'Email already exists', param: 'email', location: 'body' });
+      }
+
+      if (validationErrors.length > 0) {
+        return sendErrorResponse(res, 400, 'Validation failed', validationErrors);
       }
 
       // Hash the password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
       const USER_ID = uuidv4();
+
+      // Generate email verification token
+      const verificationToken = uuidv4();
+      const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours from now
 
       // Insert the new user into Snowflake
       const insertUserSql = `
@@ -117,8 +150,11 @@ router.post(
           COMPANY_NAME,
           COMPANY_DESCRIPTION,
           PHONE_NUMBER,
-          ADDRESS
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ADDRESS,
+          IS_EMAIL_VERIFIED,
+          EMAIL_VERIFICATION_TOKEN,
+          EMAIL_VERIFICATION_EXPIRES
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       logger.info('Executing SQL:', insertUserSql);
       await db.execute({
@@ -134,13 +170,111 @@ router.post(
           company_description,
           phone_number,
           address,
+          false, // IS_EMAIL_VERIFIED
+          verificationToken,
+          tokenExpires,
         ],
       });
 
-      res.status(201).json({ message: 'User registered successfully' });
+      // Send verification email
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const verificationLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'Verify Your Email for Kenya-EU Trade Platform',
+        html: `
+          <h1>Welcome to Kenya-EU Trade Platform</h1>
+          <p>Please click the link below to verify your email address:</p>
+          <a href="${verificationLink}">${verificationLink}</a>
+          <p>This link will expire in 24 hours.</p>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+      logger.info(`Verification email sent to ${email}`);
+
+      res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
     } catch (error) {
       logger.error('Registration error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
+      const errorDetails = [{ msg: error.message }];
+      if (process.env.NODE_ENV === 'development') {
+        errorDetails.push({ stack: error.stack });
+      }
+      sendErrorResponse(res, 500, 'Server error', errorDetails);
+    }
+  }
+);
+
+/**
+ * @route   GET /auth/verify-email
+ * @desc    Verify user's email using token from query parameter
+ * @access  Public
+ */
+router.get(
+  '/verify-email',
+  [
+    query('token').notEmpty().withMessage('Verification token is required').trim(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return sendErrorResponse(res, 400, 'Validation failed', errors.array());
+    }
+
+    const { token } = req.query;
+
+    try {
+      // Fetch user with the given token
+      const verifyEmailSql = `
+        SELECT USER_ID, EMAIL_VERIFICATION_EXPIRES, IS_EMAIL_VERIFIED
+        FROM trade.gwtrade.USERS
+        WHERE EMAIL_VERIFICATION_TOKEN = ?
+      `;
+      logger.info('Executing SQL:', verifyEmailSql);
+      const userResult = await db.execute({
+        sqlText: verifyEmailSql,
+        binds: [token],
+      });
+
+      if (!userResult || userResult.length === 0) {
+        return sendErrorResponse(res, 400, 'Invalid verification token');
+      }
+
+      const user = userResult[0];
+
+      if (user.IS_EMAIL_VERIFIED) {
+        return sendErrorResponse(res, 400, 'Email is already verified');
+      }
+
+      const now = new Date();
+      if (now > new Date(user.EMAIL_VERIFICATION_EXPIRES)) {
+        return sendErrorResponse(res, 400, 'Verification token has expired');
+      }
+
+      // Update user's email verification status
+      const updateUserSql = `
+        UPDATE trade.gwtrade.USERS
+        SET IS_EMAIL_VERIFIED = TRUE, EMAIL_VERIFICATION_TOKEN = NULL, EMAIL_VERIFICATION_EXPIRES = NULL
+        WHERE USER_ID = ?
+      `;
+      logger.info('Executing SQL:', updateUserSql);
+      await db.execute({
+        sqlText: updateUserSql,
+        binds: [user.USER_ID],
+      });
+
+      // Redirect the user to a confirmation page on the frontend
+      const redirectUrl = `${process.env.FRONTEND_URL}/email-verified`;
+      res.redirect(redirectUrl);
+    } catch (error) {
+      logger.error('Email verification error:', error);
+      const errorDetails = [{ msg: error.message }];
+      if (process.env.NODE_ENV === 'development') {
+        errorDetails.push({ stack: error.stack });
+      }
+      sendErrorResponse(res, 500, 'Server error', errorDetails);
     }
   }
 );
@@ -178,6 +312,12 @@ router.post(
       }
 
       const user = userResult[0];
+
+      // Check if email is verified
+      if (!user.IS_EMAIL_VERIFIED) {
+        return sendErrorResponse(res, 400, 'Email is not verified');
+      }
+
       const isMatch = await bcrypt.compare(password, user.PASSWORD_HASH);
       if (!isMatch) {
         return sendErrorResponse(res, 400, 'Invalid credentials');
@@ -204,7 +344,11 @@ router.post(
       );
     } catch (error) {
       logger.error('Login error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
+      const errorDetails = [{ msg: error.message }];
+      if (process.env.NODE_ENV === 'development') {
+        errorDetails.push({ stack: error.stack });
+      }
+      sendErrorResponse(res, 500, 'Server error', errorDetails);
     }
   }
 );
@@ -269,14 +413,14 @@ router.post(
       });
 
       // Create reset URL
-      const resetUrl = `https://www.ke-eutrade.org/reset-password?token=${resetToken}&id=${userId}`;
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}&id=${userId}`;
 
       // Email content
       const mailOptions = {
-        from: process.env.EMAIL_FROM || '"Support" <support@example.com>', // sender address
-        to: user.EMAIL, // list of receivers
+        from: process.env.EMAIL_USER,
+        to: user.EMAIL,
         subject: 'Password Reset Request',
-        text: `You have requested to reset your password.\n\nPlease click the link below to reset your password:\n\n${resetUrl}\n\nIf you did not request this, please ignore this email.`,
         html: `
           <p>You have requested to reset your password.</p>
           <p>Please click the link below to reset your password:</p>
@@ -293,7 +437,11 @@ router.post(
       res.status(200).json({ message: 'Password reset email sent' });
     } catch (error) {
       logger.error('Forgot password error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
+      const errorDetails = [{ msg: error.message }];
+      if (process.env.NODE_ENV === 'development') {
+        errorDetails.push({ stack: error.stack });
+      }
+      sendErrorResponse(res, 500, 'Server error', errorDetails);
     }
   }
 );
@@ -368,12 +516,6 @@ router.post(
       const user = userResult[0];
       const userId = user.USER_ID;
 
-      // Log stored and current times for debugging
-      logger.info('Token Validation Success:', {
-        storedResetPasswordExpires: user.RESET_PASSWORD_EXPIRES,
-        currentUtcTime: new Date().toISOString(),
-      });
-
       // Hash the new password
       const salt = await bcrypt.genSalt(12);
       const hashedPassword = await bcrypt.hash(password, salt);
@@ -395,17 +537,9 @@ router.post(
 
       // Send a confirmation email to the user
       const mailOptions = {
-        from: process.env.EMAIL_FROM || '"Support" <support@example.com>',
+        from: process.env.EMAIL_USER,
         to: user.EMAIL,
         subject: 'Your password has been successfully reset',
-        text: `Hello,
-
-This is a confirmation that your password has been successfully reset.
-
-If you did not perform this action, please contact our support immediately.
-
-Best regards,
-Support Team`,
         html: `
           <p>Hello,</p>
           <p>This is a confirmation that your password has been successfully reset.</p>
@@ -420,7 +554,11 @@ Support Team`,
       res.status(200).json({ message: 'Password has been reset successfully' });
     } catch (error) {
       logger.error('Reset password error:', error);
-      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
+      const errorDetails = [{ msg: error.message }];
+      if (process.env.NODE_ENV === 'development') {
+        errorDetails.push({ stack: error.stack });
+      }
+      sendErrorResponse(res, 500, 'Server error', errorDetails);
     }
   }
 );

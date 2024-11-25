@@ -2,7 +2,7 @@
 
 const snowflake = require('snowflake-sdk');
 const logger = require('./utils/logger'); // Adjust the path to your logger utility if necessary
-
+require('dotenv').config({ path: '.env' }); //to remove later
 let connection = null;
 let connectionPromise = null;
 
