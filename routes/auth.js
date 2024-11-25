@@ -12,9 +12,17 @@ const logger = require('../utils/logger'); // Your logger utility
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const nodemailer = require('nodemailer'); // Nodemailer module
+const cors = require('cors'); // CORS middleware
 
 // Apply helmet middleware for security
 router.use(helmet());
+
+// Apply CORS middleware
+router.use(cors({
+  origin: 'https://www.ke-eutrade.org', // Replace with your frontend URL
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Nodemailer transporter configuration
 const transporter = nodemailer.createTransport({
@@ -265,9 +273,8 @@ router.get(
         binds: [user.USER_ID],
       });
 
-      // Redirect the user to a confirmation page on the frontend
-      const redirectUrl = `${process.env.FRONTEND_URL}/email-verified`;
-      res.redirect(redirectUrl);
+      // Respond with success message
+      res.json({ message: 'Email verified successfully' });
     } catch (error) {
       logger.error('Email verification error:', error);
       const errorDetails = [{ msg: error.message }];
@@ -278,7 +285,6 @@ router.get(
     }
   }
 );
-
 
 /**
  * @route   POST /auth/login
