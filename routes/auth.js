@@ -233,16 +233,17 @@ router.get(
         WHERE EMAIL_VERIFICATION_TOKEN = ?
       `;
       logger.info('Executing SQL:', verifyEmailSql);
-      const userResult = await db.execute({
+      const statement = await db.execute({
         sqlText: verifyEmailSql,
         binds: [token],
       });
 
-      if (!userResult || userResult.length === 0) {
+      const result = await statement.fetchAll();
+      if (!result || result.length === 0) {
         return sendErrorResponse(res, 400, 'Invalid verification token');
       }
 
-      const user = userResult[0];
+      const user = result[0];
 
       if (user.IS_EMAIL_VERIFIED) {
         return sendErrorResponse(res, 400, 'Email is already verified');
