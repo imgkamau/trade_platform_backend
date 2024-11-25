@@ -104,11 +104,11 @@ router.post(
       // Check username
       const checkUsernameSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
       logger.info('Executing SQL:', checkUsernameSql);
-      const existingUsernameResult = await db.execute({
+      const usernameStatement = await db.execute({
         sqlText: checkUsernameSql,
         binds: [username],
       });
-
+      const existingUsernameResult = await usernameStatement.fetchAll();
       if (existingUsernameResult && existingUsernameResult.length > 0) {
         validationErrors.push({ msg: 'Username already exists', param: 'username', location: 'body' });
       }
@@ -116,11 +116,11 @@ router.post(
       // Check email
       const checkEmailSql = 'SELECT * FROM trade.gwtrade.USERS WHERE EMAIL = ?';
       logger.info('Executing SQL:', checkEmailSql);
-      const existingEmailResult = await db.execute({
+      const emailStatement = await db.execute({
         sqlText: checkEmailSql,
         binds: [email],
       });
-
+      const existingEmailResult = await emailStatement.fetchAll();
       if (existingEmailResult && existingEmailResult.length > 0) {
         validationErrors.push({ msg: 'Email already exists', param: 'email', location: 'body' });
       }
@@ -157,7 +157,7 @@ router.post(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       logger.info('Executing SQL:', insertUserSql);
-      await db.execute({
+      const insertStatement = await db.execute({
         sqlText: insertUserSql,
         binds: [
           USER_ID,
@@ -175,6 +175,7 @@ router.post(
           tokenExpires,
         ],
       });
+      await insertStatement.fetchAll(); // Ensure the insert is completed
 
       // Send verification email
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -233,16 +234,18 @@ router.get(
         WHERE EMAIL_VERIFICATION_TOKEN = ?
       `;
       logger.info('Executing SQL:', verifyEmailSql);
-      const userResult = await db.execute({
+
+      const statement = await db.execute({
         sqlText: verifyEmailSql,
         binds: [token],
       });
 
-      if (!userResult || userResult.length === 0) {
+      const rows = await statement.fetchAll();
+      if (!rows || rows.length === 0) {
         return sendErrorResponse(res, 400, 'Invalid verification token');
       }
 
-      const user = userResult[0];
+      const user = rows[0];
 
       if (user.IS_EMAIL_VERIFIED) {
         return sendErrorResponse(res, 400, 'Email is already verified');
@@ -260,10 +263,13 @@ router.get(
         WHERE USER_ID = ?
       `;
       logger.info('Executing SQL:', updateUserSql);
-      await db.execute({
+
+      const updateStatement = await db.execute({
         sqlText: updateUserSql,
         binds: [user.USER_ID],
       });
+
+      await updateStatement.fetchAll(); // Ensure the update is completed
 
       // Redirect the user to a confirmation page on the frontend
       const redirectUrl = `${process.env.FRONTEND_URL}/email-verified`;
@@ -302,10 +308,11 @@ router.post(
       // Fetch user from Snowflake
       const loginSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
       logger.info('Executing SQL:', loginSql);
-      const userResult = await db.execute({
+      const statement = await db.execute({
         sqlText: loginSql,
         binds: [username],
       });
+      const userResult = await statement.fetchAll();
 
       if (!userResult || userResult.length === 0) {
         return sendErrorResponse(res, 400, 'Invalid credentials');
@@ -380,10 +387,11 @@ router.post(
       // Check if user exists
       const checkUserSql = 'SELECT USER_ID, EMAIL FROM trade.gwtrade.USERS WHERE EMAIL = ?';
       logger.info('Executing SQL:', checkUserSql);
-      const userResult = await db.execute({
+      const statement = await db.execute({
         sqlText: checkUserSql,
         binds: [email],
       });
+      const userResult = await statement.fetchAll();
 
       if (!userResult || userResult.length === 0) {
         // For security, don't reveal that email doesn't exist
@@ -407,10 +415,11 @@ router.post(
         WHERE USER_ID = ?
       `;
       logger.info('Executing SQL:', updateUserSql);
-      await db.execute({
+      const updateStatement = await db.execute({
         sqlText: updateUserSql,
         binds: [resetTokenHash, resetTokenExpiry, userId],
       });
+      await updateStatement.fetchAll(); // Ensure the update is completed
 
       // Create reset URL
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -503,10 +512,11 @@ router.post(
         sql: checkTokenSql,
         binds: [id, resetTokenHash],
       });
-      const userResult = await db.execute({
+      const statement = await db.execute({
         sqlText: checkTokenSql,
         binds: [id, resetTokenHash],
       });
+      const userResult = await statement.fetchAll();
 
       if (!userResult || userResult.length === 0) {
         logger.info(`Invalid or expired password reset token for user ID: ${id}`);
@@ -530,10 +540,11 @@ router.post(
         sql: updatePasswordSql,
         binds: [hashedPassword, userId],
       });
-      await db.execute({
+      const updateStatement = await db.execute({
         sqlText: updatePasswordSql,
         binds: [hashedPassword, userId],
       });
+      await updateStatement.fetchAll(); // Ensure the update is completed
 
       // Send a confirmation email to the user
       const mailOptions = {
