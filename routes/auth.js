@@ -346,7 +346,19 @@ router.post(
             logger.error('JWT Sign error:', err);
             throw err;
           }
-          res.json({ token });
+
+          // Exclude sensitive information before sending the user object
+          const userResponse = {
+            id: user.USER_ID,
+            username: user.USERNAME,
+            email: user.EMAIL,
+            full_name: user.FULL_NAME,
+            role: user.ROLE,
+            isEmailVerified: user.IS_EMAIL_VERIFIED,
+            // Include other necessary fields, but exclude sensitive ones like PASSWORD_HASH
+          };
+
+          res.json({ token, user: userResponse });
         }
       );
     } catch (error) {
