@@ -248,9 +248,10 @@ router.post(
 router.use(authMiddleware);
 router.use(authorize(['seller', 'buyer']));
 
-// GET: Fetch documents
+// GET: Fetch documents (Modified to return documents for the authenticated user)
 router.get('/', async (req, res) => {
   logger.info('Entered GET /api/documents route');
+  const userId = req.user.id; // Get the authenticated user's ID
   try {
     const rows = await db.execute({
       sqlText: `
@@ -261,10 +262,18 @@ router.get('/', async (req, res) => {
           FILE_PATH,
           CREATED_AT
         FROM trade.gwtrade.Documents
+        WHERE USER_ID = ?
         ORDER BY CREATED_AT DESC
       `,
+      binds: [userId],
     });
-    logger.info(`Fetched ${rows.length} documents.`);
+
+    if (!rows || rows.length === 0) {
+      logger.info(`No documents found for user ${userId}.`);
+      return res.status(200).json([]); // Return an empty array if no documents
+    }
+
+    logger.info(`Fetched ${rows.length} documents for user ${userId}.`);
     res.json(rows);
   } catch (error) {
     logger.error('Error fetching documents:', error);
@@ -275,9 +284,10 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET: Download a specific document
+// GET: Download a specific document (Modified to check document ownership)
 router.get('/:documentId', async (req, res) => {
   const { documentId } = req.params;
+  const userId = req.user.id; // Get the authenticated user's ID
   logger.info(`Entered GET /api/documents/${documentId} route`);
   try {
     const rows = await db.execute({
@@ -286,12 +296,13 @@ router.get('/:documentId', async (req, res) => {
           TYPE_ID,
           FILE_PATH
         FROM trade.gwtrade.Documents
-        WHERE DOCUMENT_ID = ?
+        WHERE DOCUMENT_ID = ? AND USER_ID = ?
       `,
-      binds: [documentId],
+      binds: [documentId, userId],
     });
 
-    if (rows.length === 0) {
+    if (!rows || rows.length === 0) {
+      logger.warn(`Document ${documentId} not found or not owned by user ${userId}.`);
       return res.status(404).json({ message: 'Document not found' });
     }
 
