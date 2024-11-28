@@ -6,6 +6,7 @@ const db = require('../db'); // Snowflake database module
 const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
 const logger = require('../utils/logger');
+const logActivity = require('../utils/activityLogger');
 
 // Place a new order (Buyers only)
 router.post('/', authMiddleware, async (req, res) => {
@@ -144,6 +145,7 @@ router.post('/', authMiddleware, async (req, res) => {
     await db.execute({ sqlText: 'COMMIT', binds: [] });
 
     res.status(201).json({ message: 'Order placed successfully', orderId: ORDER_ID });
+    await logActivity(req.user.id, 'New order received', 'order');
   } catch (error) {
     console.error('Error placing order:', error);
     // Rollback transaction
