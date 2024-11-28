@@ -8,6 +8,8 @@ const authMiddleware = require('../middleware/auth');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 
+const CONVERSATIONS_LIMIT = 50; // Example limit for recent activities
+
 // Place a new order (Buyers only)
 router.post('/', authMiddleware, async (req, res) => {
   const { items } = req.body; // items is an array of { productName, quantity }
@@ -31,6 +33,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // To collect unique seller-product pairs
     const sellerProductMap = new Map();
+    const sellersSet = new Set(); // To collect unique seller IDs
 
     for (const item of items) {
       const { productName, quantity } = item;
@@ -65,7 +68,7 @@ router.post('/', authMiddleware, async (req, res) => {
       const sellerId = product.SELLER_ID;
 
       if (product.STOCK < quantity) {
-        throw new Error(`Insufficient stock for product ${product.NAME}`);
+        throw new Error(`Insufficient stock for product "${product.NAME}"`);
       }
 
       const itemTotal = product.PRICE * quantity;
@@ -98,6 +101,7 @@ router.post('/', authMiddleware, async (req, res) => {
       const key = `${sellerId}-${productId}`;
       if (!sellerProductMap.has(key)) {
         sellerProductMap.set(key, { sellerId, productId });
+        sellersSet.add(sellerId); // Add to sellers set
       }
     }
 
@@ -108,8 +112,9 @@ router.post('/', authMiddleware, async (req, res) => {
           ORDER_ID,
           BUYER_ID,
           TOTAL_AMOUNT,
+          STATUS,
           CREATED_AT
-        ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, 'Pending', CURRENT_TIMESTAMP)
       `,
       binds: [ORDER_ID, buyerId, totalAmount],
     });
@@ -144,8 +149,13 @@ router.post('/', authMiddleware, async (req, res) => {
     // Commit transaction
     await db.execute({ sqlText: 'COMMIT', binds: [] });
 
+    // Log activities for each unique seller
+    for (const sellerId of sellersSet) {
+      await logActivity(sellerId, 'New order received', 'order');
+    }
+
+    // Send response to the client
     res.status(201).json({ message: 'Order placed successfully', orderId: ORDER_ID });
-    await logActivity(req.user.id, 'New order received', 'order');
   } catch (error) {
     console.error('Error placing order:', error);
     // Rollback transaction
@@ -170,6 +180,7 @@ router.get('/', authMiddleware, async (req, res) => {
             o.ORDER_ID,
             o.BUYER_ID,
             o.TOTAL_AMOUNT,
+            o.STATUS,
             o.CREATED_AT,
             oi.ORDER_ITEM_ID,
             oi.PRODUCT_ID,
@@ -193,6 +204,7 @@ router.get('/', authMiddleware, async (req, res) => {
             o.BUYER_ID,
             u.FULL_NAME AS BUYER_NAME,
             o.TOTAL_AMOUNT,
+            o.STATUS,
             o.CREATED_AT,
             oi.ORDER_ITEM_ID,
             oi.PRODUCT_ID,
