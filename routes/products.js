@@ -29,7 +29,22 @@ router.get('/', async (req, res) => {
     const currentSchema = dbSchemaRows[0].CURRENT_SCHEMA;
     console.log(`Current Database: ${currentDb}, Current Schema: ${currentSchema}`);
 
-    const sql = 'SELECT * FROM trade.gwtrade.PRODUCTS'; // Fully qualified table name
+    // Modified SQL to include SELLER_NAME by joining with USERS table
+    const sql = `
+      SELECT 
+        p.PRODUCT_ID,
+        p.NAME,
+        p.DESCRIPTION,
+        p.PRICE,
+        p.STOCK,
+        p.CATEGORY,
+        p.UPDATED_AT,
+        p.SELLER_ID,
+        u.FULL_NAME AS SELLER_NAME
+      FROM trade.gwtrade.PRODUCTS p
+      LEFT JOIN trade.gwtrade.USERS u ON p.SELLER_ID = u.USER_ID
+      WHERE u.ROLE = 'seller'
+    `; // Fully qualified table name
     console.log('Executing SQL query:', sql);
 
     const rows = await db.execute({ sqlText: sql });
@@ -46,6 +61,7 @@ router.get('/', async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
 
 // GET: Retrieve products for the authenticated seller
 router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) => {
@@ -84,33 +100,81 @@ router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) =>
 });
 
 // POST /api/products - Create a new product (Sellers only)
-router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
-  const { NAME, DESCRIPTION, PRICE, STOCK } = req.body;
-  const SELLER_ID = req.user.id; // Get SELLER_ID from the authenticated user
+router.post(
+  '/',
+  authMiddleware,
+  authorize(['seller']),
+  [
+    // Validation middleware (optional but recommended)
+    body('NAME').notEmpty().withMessage('Product name is required'),
+    body('DESCRIPTION').notEmpty().withMessage('Description is required'),
+    body('PRICE').isFloat({ gt: 0 }).withMessage('Price must be a positive number'),
+    body('STOCK').isInt({ gt: -1 }).withMessage('Stock must be a non-negative integer'),
+    body('CATEGORY').optional().isString().withMessage('Category must be a string'),
+  ],
+  async (req, res) => {
+    // Handle validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
-  // Validate input
-  if (!NAME || !DESCRIPTION || !PRICE || !STOCK) {
-    return res.status(400).json({ message: 'All fields are required' });
+    const { NAME, DESCRIPTION, PRICE, STOCK, CATEGORY } = req.body;
+    const SELLER_ID = req.user.id; // Get SELLER_ID from the authenticated user
+
+    try {
+      // Fetch SELLER_NAME from the USERS table
+      const sellerResult = await db.execute({
+        sqlText: `SELECT FULL_NAME FROM trade.gwtrade.USERS WHERE USER_ID = ? AND ROLE = 'seller'`,
+        binds: [SELLER_ID],
+      });
+
+      if (!sellerResult || sellerResult.length === 0) {
+        return res.status(404).json({ message: 'Seller not found' });
+      }
+
+      const SELLER_NAME = sellerResult[0].FULL_NAME;
+
+      const PRODUCT_ID = uuidv4(); // Generate a unique ID for the product
+
+      // Insert the new product into the database, including SELLER_NAME
+      await db.execute({
+        sqlText: `
+          INSERT INTO trade.gwtrade.PRODUCTS (
+            PRODUCT_ID,
+            NAME,
+            DESCRIPTION,
+            PRICE,
+            STOCK,
+            SELLER_ID,
+            SELLER_NAME,
+            CATEGORY,
+            UPDATED_AT
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP())
+        `,
+        binds: [
+          PRODUCT_ID,
+          NAME,
+          DESCRIPTION,
+          PRICE,
+          STOCK,
+          SELLER_ID,
+          SELLER_NAME,
+          CATEGORY || null, // Handle optional CATEGORY
+        ],
+      });
+
+      // Log activity for the seller
+      const logActivity = require('../utils/activityLogger');
+      await logActivity(SELLER_ID, `Posted new product "${NAME}"`, 'other');
+
+      res.status(201).json({ message: 'Product created successfully', productId: PRODUCT_ID });
+    } catch (error) {
+      console.error('Error creating product:', error);
+      res.status(500).json({ message: 'Server error', error: error.message });
+    }
   }
-
-  try {
-    const PRODUCT_ID = uuidv4(); // Generate a unique ID for the product
-
-    // Insert the new product into the database
-    await db.execute({
-      sqlText: `
-        INSERT INTO trade.gwtrade.PRODUCTS (PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      binds: [PRODUCT_ID, NAME, DESCRIPTION, PRICE, STOCK, SELLER_ID],
-    });
-
-    res.status(201).json({ message: 'Product created successfully' });
-  } catch (error) {
-    console.error('Error creating product:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
+);
 
 // Update a product (Sellers only)
 router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res) => {
