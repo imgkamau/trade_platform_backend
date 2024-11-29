@@ -1,6 +1,8 @@
 // utils/emailService.js
 
 const nodemailer = require('nodemailer');
+const logger = require('./logger'); // Ensure you have a logger utility
+require('dotenv').config(); // To load environment variables
 
 // Create a transporter object using the default SMTP transport
 const transporter = nodemailer.createTransport({
@@ -27,11 +29,41 @@ const sendVerificationEmail = async (email, token) => {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent to ${email}`);
+    logger.info(`Verification email sent to ${email}`);
   } catch (error) {
-    console.error('Error sending verification email:', error);
+    logger.error('Error sending verification email:', error);
     throw new Error('Email could not be sent');
   }
 };
 
-module.exports = { sendVerificationEmail };
+// **New Function: Send Quote Request Email**
+const sendQuoteRequestEmail = async (email, sellerName, buyerName, productName, quantity, quoteId) => {
+  const quoteLink = `${process.env.FRONTEND_URL}/quotes/${quoteId}`; // Adjust based on your frontend routing
+
+  const mailOptions = {
+    from: `"Trade Platform" <${process.env.EMAIL_FROM}>`, // Sender address
+    to: email, // Seller's email address
+    subject: 'New Quote Request Received',
+    html: `
+      <p>Hello ${sellerName},</p>
+      <p>You have received a new quote request for your product "<strong>${productName}</strong>".</p>
+      <p><strong>Details:</strong></p>
+      <ul>
+        <li>Quantity: ${quantity}</li>
+        <li>Buyer: ${buyerName}</li>
+      </ul>
+      <p>Please <a href="${quoteLink}">click here</a> to view and respond to this quote.</p>
+      <p>Best regards,<br/>Trade Platform Team</p>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    logger.info(`Quote request email sent to ${email} for quote ID: ${quoteId}`);
+  } catch (error) {
+    logger.error(`Error sending quote request email to ${email}:`, error);
+    throw new Error('Quote request email could not be sent');
+  }
+};
+
+module.exports = { sendVerificationEmail, sendQuoteRequestEmail };
