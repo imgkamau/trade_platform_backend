@@ -12,19 +12,21 @@ const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import th
 // POST /api/quotes - Request a new quote
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { productId, quantity } = req.body; // Now accepting 'productId'
-    const buyerId = req.user.id; // Buyer ID from authenticated user
-    const buyerName = req.user.fullName || 'Buyer'; // Adjust based on your user data structure
+    const { productId, quantity } = req.body;
+    const buyerId = req.user.id;
+    const buyerName = req.user.fullName || 'Buyer';
 
-    // **Input Validation**
+    // Input Validation
     if (!productId || typeof productId !== 'string') {
-      return res.status(400).json({ message: 'Product ID is required and must be a string.' });
+      logger.warn(`Invalid productId received: ${productId}`);
+      return res.status(400).json({ message: 'Invalid or missing productId.' });
     }
     if (!quantity || !Number.isInteger(quantity) || quantity <= 0) {
+      logger.warn(`Invalid quantity received: ${quantity}`);
       return res.status(400).json({ message: 'Quantity must be a positive integer.' });
     }
 
-    // **Fetch the product details using 'productId'**
+    // Fetch product details
     const productResult = await db.execute({
       sqlText: `
         SELECT 
@@ -45,6 +47,7 @@ router.post('/', authMiddleware, async (req, res) => {
     });
 
     if (!productResult || productResult.length === 0) {
+      logger.warn(`Product not found for productId: ${productId}`);
       return res.status(404).json({ message: 'Product not found.' });
     }
 
@@ -53,10 +56,8 @@ router.post('/', authMiddleware, async (req, res) => {
     const sellerEmail = product.SELLER_EMAIL;
     const sellerName = product.SELLER_NAME;
 
-    // **Generate a new quote ID**
+    // Insert quote into database
     const quoteId = uuidv4();
-
-    // **Insert the new quote into the database**
     await db.execute({
       sqlText: `
         INSERT INTO trade.gwtrade.QUOTES (
@@ -72,11 +73,14 @@ router.post('/', authMiddleware, async (req, res) => {
       binds: [quoteId, productId, buyerId, sellerId, quantity],
     });
 
-    // **Log activity for the seller**
+    logger.info(`Quote inserted: QuoteID=${quoteId}, ProductID=${productId}, BuyerID=${buyerId}, Quantity=${quantity}`);
+
+    // Log activity
     const activityMessage = `New quote requested for product "${product.PRODUCT_NAME}" by ${buyerName}.`;
     await logActivity(sellerId, activityMessage, 'quote');
+    logger.info(`Activity logged: ${activityMessage}`);
 
-    // **Send notification email to the seller using SendGrid**
+    // Send email via SendGrid
     try {
       await sendQuoteRequestEmail(
         sellerEmail,
@@ -86,19 +90,19 @@ router.post('/', authMiddleware, async (req, res) => {
         quantity,
         quoteId
       );
+      logger.info(`Quote request email sent: QuoteID=${quoteId}, SellerEmail=${sellerEmail}`);
     } catch (emailError) {
-      logger.error(`Failed to send quote request email to ${sellerEmail}:`, emailError);
-      // **Respond to the buyer that the quote was created but email failed**
+      logger.error(`Failed to send quote request email: QuoteID=${quoteId}, Error=${emailError.message}`);
       return res.status(500).json({
         message: 'Quote requested successfully, but failed to send email notification to the seller.',
         quoteId,
       });
     }
 
-    // **Respond to the buyer**
+    // Respond to buyer
     res.status(201).json({ message: 'Quote requested successfully.', quoteId });
   } catch (error) {
-    logger.error('Error creating quote:', error);
+    logger.error(`Unexpected error in /api/quotes: ${error.message}`, error);
     res.status(500).json({ message: 'An error occurred while creating the quote.', error: error.message });
   }
 });
