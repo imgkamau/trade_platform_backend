@@ -12,19 +12,19 @@ const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import th
 // POST /api/quotes - Request a new quote
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { name, quantity } = req.body; // 'name' refers to product name
+    const { productId, quantity } = req.body; // Now accepting 'productId'
     const buyerId = req.user.id; // Buyer ID from authenticated user
     const buyerName = req.user.fullName || 'Buyer'; // Adjust based on your user data structure
 
     // **Input Validation**
-    if (!name || typeof name !== 'string') {
-      return res.status(400).json({ message: 'Product name is required and must be a string.' });
+    if (!productId || typeof productId !== 'string') {
+      return res.status(400).json({ message: 'Product ID is required and must be a string.' });
     }
     if (!quantity || !Number.isInteger(quantity) || quantity <= 0) {
       return res.status(400).json({ message: 'Quantity must be a positive integer.' });
     }
 
-    // **Fetch the product details including the seller's ID and email**
+    // **Fetch the product details using 'productId'**
     const productResult = await db.execute({
       sqlText: `
         SELECT 
@@ -39,24 +39,16 @@ router.post('/', authMiddleware, async (req, res) => {
         JOIN 
           trade.gwtrade.USERS u ON p.SELLER_ID = u.USER_ID
         WHERE 
-          p.NAME = ? AND u.ROLE = 'seller'
+          p.PRODUCT_ID = ? AND u.ROLE = 'seller'
       `,
-      binds: [name],
+      binds: [productId],
     });
 
     if (!productResult || productResult.length === 0) {
       return res.status(404).json({ message: 'Product not found.' });
     }
 
-    // **Handle multiple products with the same name**
-    if (productResult.length > 1) {
-      return res.status(400).json({
-        message: 'Multiple products found with that name. Please specify further.',
-      });
-    }
-
     const product = productResult[0];
-    const productId = product.PRODUCT_ID;
     const sellerId = product.SELLER_ID;
     const sellerEmail = product.SELLER_EMAIL;
     const sellerName = product.SELLER_NAME;
