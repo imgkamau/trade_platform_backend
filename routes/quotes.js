@@ -107,6 +107,99 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/quotes/:id/respond - Respond to a quote request 
+router.post('/:id/respond', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { price, notes } = req.body;
+    const sellerId = req.user.id;
+
+    // Validate input
+    if (!price || typeof price !== 'number' || price <= 0) {
+      return res.status(400).json({ message: 'Invalid price. Must be a positive number.' });
+    }
+
+    // Check if the quote exists and belongs to the seller
+    const quoteResult = await db.execute({
+      sqlText: `
+        SELECT * FROM trade.gwtrade.QUOTES
+        WHERE QUOTE_ID = ? AND SELLER_ID = ?
+      `,
+      binds: [id, sellerId],
+    });
+
+    if (quoteResult.length === 0) {
+      return res.status(404).json({ message: 'Quote not found or you do not have permission to respond to this quote.' });
+    }
+
+    // Update the quote with the response
+    await db.execute({
+      sqlText: `
+        UPDATE trade.gwtrade.QUOTES
+        SET STATUS = 'Responded', PRICE = ?, SELLER_NOTES = ?, RESPONDED_AT = CURRENT_TIMESTAMP()
+        WHERE QUOTE_ID = ?
+      `,
+      binds: [price, notes, id],
+    });
+
+    // Log activity
+    await logActivity(sellerId, `Responded to quote request ${id}`, 'quote');
+
+    // Send notification to the buyer (you can implement this later)
+
+    res.status(200).json({ message: 'Quote response submitted successfully.' });
+  } catch (error) {
+    console.error('Error responding to quote:', error);
+    res.status(500).json({ message: 'An error occurred while responding to the quote.', error: error.message });
+  }
+});
+
+// GET /api/quotes/:id - Get a specific quote
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    let quote;
+    if (role === 'seller') {
+      quote = await db.execute({
+        sqlText: `
+          SELECT q.*, p.NAME AS PRODUCT_NAME, u.FULL_NAME AS BUYER_NAME
+          FROM trade.gwtrade.QUOTES q
+          JOIN trade.gwtrade.PRODUCTS p ON q.PRODUCT_ID = p.PRODUCT_ID
+          JOIN trade.gwtrade.USERS u ON q.BUYER_ID = u.USER_ID
+          WHERE q.QUOTE_ID = ? AND q.SELLER_ID = ?
+        `,
+        binds: [id, userId],
+      });
+    } else if (role === 'buyer') {
+      quote = await db.execute({
+        sqlText: `
+          SELECT q.*, p.NAME AS PRODUCT_NAME, u.FULL_NAME AS SELLER_NAME
+          FROM trade.gwtrade.QUOTES q
+          JOIN trade.gwtrade.PRODUCTS p ON q.PRODUCT_ID = p.PRODUCT_ID
+          JOIN trade.gwtrade.USERS u ON q.SELLER_ID = u.USER_ID
+          WHERE q.QUOTE_ID = ? AND q.BUYER_ID = ?
+        `,
+        binds: [id, userId],
+      });
+    } else {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    if (quote.length === 0) {
+      return res.status(404).json({ message: 'Quote not found or you do not have permission to view this quote.' });
+    }
+
+    res.status(200).json(quote[0]);
+  } catch (error) {
+    console.error('Error fetching quote:', error);
+    res.status(500).json({ message: 'An error occurred while fetching the quote.', error: error.message });
+  }
+});
+
+
 // **GET /api/quotes - Get all quotes for a buyer or seller**
 router.get('/', authMiddleware, async (req, res) => {
   try {
