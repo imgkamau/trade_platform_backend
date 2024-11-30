@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid'); // For generating unique IDs
 const authMiddleware = require('../middleware/auth');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
-const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import the new email function
+const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import the SendGrid function
 
 // POST /api/quotes - Request a new quote
 router.post('/', authMiddleware, async (req, res) => {
@@ -16,7 +16,7 @@ router.post('/', authMiddleware, async (req, res) => {
     const buyerId = req.user.id; // Buyer ID from authenticated user
     const buyerName = req.user.fullName || 'Buyer'; // Adjust based on your user data structure
 
-    // Input Validation
+    // **Input Validation**
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ message: 'Product name is required and must be a string.' });
     }
@@ -24,7 +24,7 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Quantity must be a positive integer.' });
     }
 
-    // Fetch the product details including the seller's ID and email
+    // **Fetch the product details including the seller's ID and email**
     const productResult = await db.execute({
       sqlText: `
         SELECT 
@@ -48,7 +48,7 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Product not found.' });
     }
 
-    // Handle multiple products with the same name
+    // **Handle multiple products with the same name**
     if (productResult.length > 1) {
       return res.status(400).json({
         message: 'Multiple products found with that name. Please specify further.',
@@ -61,10 +61,10 @@ router.post('/', authMiddleware, async (req, res) => {
     const sellerEmail = product.SELLER_EMAIL;
     const sellerName = product.SELLER_NAME;
 
-    // Generate a new quote ID
+    // **Generate a new quote ID**
     const quoteId = uuidv4();
 
-    // Insert the new quote into the database
+    // **Insert the new quote into the database**
     await db.execute({
       sqlText: `
         INSERT INTO trade.gwtrade.QUOTES (
@@ -80,11 +80,11 @@ router.post('/', authMiddleware, async (req, res) => {
       binds: [quoteId, productId, buyerId, sellerId, quantity],
     });
 
-    // Log activity for the seller
+    // **Log activity for the seller**
     const activityMessage = `New quote requested for product "${product.PRODUCT_NAME}" by ${buyerName}.`;
     await logActivity(sellerId, activityMessage, 'quote');
 
-    // Send notification email to the seller
+    // **Send notification email to the seller using SendGrid**
     try {
       await sendQuoteRequestEmail(
         sellerEmail,
@@ -96,14 +96,14 @@ router.post('/', authMiddleware, async (req, res) => {
       );
     } catch (emailError) {
       logger.error(`Failed to send quote request email to ${sellerEmail}:`, emailError);
-      // Optionally, inform the buyer that the email failed but proceed
+      // **Respond to the buyer that the quote was created but email failed**
       return res.status(500).json({
         message: 'Quote requested successfully, but failed to send email notification to the seller.',
         quoteId,
       });
     }
 
-    // Respond to the buyer
+    // **Respond to the buyer**
     res.status(201).json({ message: 'Quote requested successfully.', quoteId });
   } catch (error) {
     logger.error('Error creating quote:', error);
@@ -111,7 +111,7 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/quotes - Get all quotes for a buyer or seller
+// **GET /api/quotes - Get all quotes for a buyer or seller**
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -120,7 +120,7 @@ router.get('/', authMiddleware, async (req, res) => {
     let quotes;
 
     if (role === 'buyer') {
-      // Buyers fetch their own quotes
+      // **Buyers fetch their own quotes**
       quotes = await db.execute({
         sqlText: `
           SELECT 
@@ -147,7 +147,7 @@ router.get('/', authMiddleware, async (req, res) => {
         binds: [userId],
       });
     } else if (role === 'seller') {
-      // Sellers fetch quotes received for their products
+      // **Sellers fetch quotes received for their products**
       quotes = await db.execute({
         sqlText: `
           SELECT 
