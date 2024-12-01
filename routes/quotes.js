@@ -8,6 +8,7 @@ const authMiddleware = require('../middleware/auth');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import the SendGrid function
+const { sendQuoteResponseEmail } = require('../utils/emailService'); // Import the email function
 
 // POST /api/quotes - Request a new quote
 router.post('/', authMiddleware, async (req, res) => {
@@ -185,19 +186,22 @@ router.get('/:id', authMiddleware, async (req, res) => {
         binds: [id, userId],
       });
     } else {
+      logger.warn(`Access denied: User ID=${userId}, Role=${role} attempting to access Quote ID=${id}`);
       return res.status(403).json({ message: 'Access denied.' });
     }
 
     if (quote.length === 0) {
+      logger.warn(`Quote not found or unauthorized access: Quote ID=${id}, User ID=${userId}, Role=${role}`);
       return res.status(404).json({ message: 'Quote not found or you do not have permission to view this quote.' });
     }
 
     res.status(200).json(quote[0]);
   } catch (error) {
-    console.error('Error fetching quote:', error);
+    logger.error(`Error fetching quote ID=${id}: ${error.message}`, error);
     res.status(500).json({ message: 'An error occurred while fetching the quote.', error: error.message });
   }
 });
+
 
 
 // **GET /api/quotes - Get all quotes for a buyer or seller**
@@ -269,6 +273,88 @@ router.get('/', authMiddleware, async (req, res) => {
   } catch (error) {
     logger.error('Error fetching quotes:', error);
     res.status(500).json({ message: 'An error occurred while fetching quotes.', error: error.message });
+  }
+});
+
+// POST /api/quotes/:id/respond - Respond to a quote request
+router.post('/:id/respond', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { price, notes } = req.body;
+    const sellerId = req.user.id;
+
+    // Validate and parse 'price'
+    const parsedPrice = parseFloat(price);
+    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+      logger.warn(`Invalid price received: ${price} for quote ID=${id} by seller ID=${sellerId}`);
+      return res.status(400).json({ message: 'Invalid price. Must be a positive number.' });
+    }
+
+    // Validate 'notes'
+    const sellerNotes = typeof notes === 'string' ? notes.trim() : '';
+
+    // Check if the quote exists and belongs to the seller
+    const quoteResult = await db.execute({
+      sqlText: `
+        SELECT q.*, u.EMAIL AS BUYER_EMAIL, u.FULL_NAME AS BUYER_NAME, p.NAME AS PRODUCT_NAME
+        FROM trade.gwtrade.QUOTES q
+        JOIN trade.gwtrade.USERS u ON q.BUYER_ID = u.USER_ID
+        JOIN trade.gwtrade.PRODUCTS p ON q.PRODUCT_ID = p.PRODUCT_ID
+        WHERE q.QUOTE_ID = ? AND q.SELLER_ID = ?
+      `,
+      binds: [id, sellerId],
+    });
+
+    if (quoteResult.length === 0) {
+      logger.warn(`Quote not found or unauthorized access: Quote ID=${id}, Seller ID=${sellerId}`);
+      return res.status(404).json({ message: 'Quote not found or you do not have permission to respond to this quote.' });
+    }
+
+    const quote = quoteResult[0];
+
+    // Check if the quote is already responded to
+    if (quote.STATUS === 'Responded') {
+      logger.warn(`Attempt to respond to an already responded quote: Quote ID=${id}`);
+      return res.status(400).json({ message: 'This quote has already been responded to.' });
+    }
+
+    // Update the quote with the response
+    await db.execute({
+      sqlText: `
+        UPDATE trade.gwtrade.QUOTES
+        SET STATUS = 'Responded', PRICE = ?, SELLER_NOTES = ?, RESPONDED_AT = CURRENT_TIMESTAMP()
+        WHERE QUOTE_ID = ?
+      `,
+      binds: [parsedPrice, sellerNotes, id],
+    });
+
+    logger.info(`Quote responded: Quote ID=${id}, Seller ID=${sellerId}, Price=${parsedPrice}`);
+
+    // Log activity
+    const activityMessage = `Responded to quote request ${id} with price ${parsedPrice}.`;
+    await logActivity(sellerId, activityMessage, 'quote');
+    logger.info(`Activity logged for quote response: Quote ID=${id}, Seller ID=${sellerId}`);
+
+    // Send notification to the buyer using SendGrid
+    try {
+      await sendQuoteResponseEmail(
+        quote.BUYER_EMAIL,
+        quote.BUYER_NAME,
+        quote.PRODUCT_NAME,
+        parsedPrice,
+        sellerNotes,
+        id
+      );
+      logger.info(`Quote response email sent to buyer: Quote ID=${id}, Buyer Email=${quote.BUYER_EMAIL}`);
+    } catch (emailError) {
+      logger.error(`Failed to send quote response email to buyer: Quote ID=${id}, Error=${emailError.message}`);
+      // Optionally, decide how to handle this failure (e.g., notify admin, retry, etc.)
+    }
+
+    res.status(200).json({ message: 'Quote response submitted successfully.' });
+  } catch (error) {
+    logger.error(`Error responding to quote ID=${id}: ${error.message}`, error);
+    res.status(500).json({ message: 'An error occurred while responding to the quote.', error: error.message });
   }
 });
 

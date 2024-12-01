@@ -92,4 +92,46 @@ Trade Platform Team`,
   }
 };
 
-module.exports = { sendVerificationEmail, sendQuoteRequestEmail };
+const sendQuoteResponseEmail = async (email, buyerName, productName, price, notes, quoteId) => {
+  const quoteLink = `${process.env.FRONTEND_URL}/quotes/${quoteId}`;
+
+  const msg = {
+    to: email,
+    from: `"Trade Platform" <${process.env.EMAIL_FROM}>`,
+    subject: 'Your Quote Request Has Been Responded To',
+    text: `Hello ${buyerName},
+
+You have received a response to your quote request for "${productName}".
+
+Details:
+- Price per Unit: $${price.toFixed(2)}
+- Notes: ${notes || 'No additional notes.'}
+
+Please visit the following link to view the details:
+${quoteLink}
+
+Best regards,
+Trade Platform Team`,
+    html: `
+      <p>Hello ${buyerName},</p>
+      <p>You have received a response to your quote request for "<strong>${productName}</strong>".</p>
+      <p><strong>Details:</strong></p>
+      <ul>
+        <li>Price per Unit: $${price.toFixed(2)}</li>
+        <li>Notes: ${notes ? notes.replace(/\n/g, '<br/>') : 'No additional notes.'}</li>
+      </ul>
+      <p>Please <a href="${quoteLink}">click here</a> to view the details.</p>
+      <p>Best regards,<br/>Trade Platform Team</p>
+    `,
+  };
+
+  try {
+    await sgMail.send(msg);
+    logger.info(`Quote response email sent to buyer: ${email} for Quote ID=${quoteId}`);
+  } catch (error) {
+    logger.error(`Error sending quote response email to buyer (${email}): ${error.message}`, error);
+    throw new Error('Failed to send quote response email to buyer.');
+  }
+};
+
+module.exports = { sendVerificationEmail, sendQuoteRequestEmail, sendQuoteResponseEmail };
