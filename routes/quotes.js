@@ -318,14 +318,39 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'This quote has already been responded to.' });
     }
 
-    // Update the quote with the response
-    await db.execute({
+    // Check if the PRICE column exists
+    const checkPriceColumn = await db.execute({
       sqlText: `
-        UPDATE trade.gwtrade.QUOTES
-        SET STATUS = 'Responded', PRICE = ?, SELLER_NOTES = ?, RESPONDED_AT = CURRENT_TIMESTAMP()
-        WHERE QUOTE_ID = ?
+        SELECT COUNT(*) AS COLUMN_EXISTS 
+        FROM information_schema.columns 
+        WHERE table_schema = 'GWTRADE' 
+        AND table_name = 'QUOTES' 
+        AND column_name = 'PRICE'
       `,
-      binds: [parsedPrice, sellerNotes, id],
+    });
+
+    const priceColumnExists = checkPriceColumn[0].COLUMN_EXISTS > 0;
+
+    // Update the quote with the response
+    let updateSql = `
+      UPDATE trade.gwtrade.QUOTES
+      SET STATUS = 'Responded', SELLER_NOTES = ?, RESPONDED_AT = CURRENT_TIMESTAMP()
+    `;
+    let binds = [sellerNotes];
+
+    if (priceColumnExists) {
+      updateSql += `, PRICE = ?`;
+      binds.push(parsedPrice);
+    } else {
+      logger.warn(`PRICE column does not exist in QUOTES table. Skipping price update for Quote ID=${id}`);
+    }
+
+    updateSql += ` WHERE QUOTE_ID = ?`;
+    binds.push(id);
+
+    await db.execute({
+      sqlText: updateSql,
+      binds: binds,
     });
 
     logger.info(`Quote responded: Quote ID=${id}, Seller ID=${sellerId}, Price=${parsedPrice}`);
@@ -335,7 +360,7 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
     await logActivity(sellerId, activityMessage, 'quote');
     logger.info(`Activity logged for quote response: Quote ID=${id}, Seller ID=${sellerId}`);
 
-    // Send notification to the buyer using SendGrid
+    // Send notification to the buyer
     try {
       await sendQuoteResponseEmail(
         quote.BUYER_EMAIL,
@@ -348,12 +373,12 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
       logger.info(`Quote response email sent to buyer: Quote ID=${id}, Buyer Email=${quote.BUYER_EMAIL}`);
     } catch (emailError) {
       logger.error(`Failed to send quote response email to buyer: Quote ID=${id}, Error=${emailError.message}`);
-      // Optionally, decide how to handle this failure (e.g., notify admin, retry, etc.)
+      // Optionally handle email sending failure
     }
 
     res.status(200).json({ message: 'Quote response submitted successfully.' });
   } catch (error) {
-    logger.error(`Error responding to quote ID=${id}: ${error.message}`, error);
+    logger.error(`Error responding to quote ID=${req.params.id}: ${error.message}`, error);
     res.status(500).json({ message: 'An error occurred while responding to the quote.', error: error.message });
   }
 });
