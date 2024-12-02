@@ -1,23 +1,23 @@
 // utils/testEmail.js
 
-const { sendQuoteRequestEmail } = require('./emailService');
+const { sendQuoteResponseEmail } = require('./emailService');
 const logger = require('./logger');
 
-const testSendQuoteRequestEmail = async () => {
+const testSendQuoteResponseEmail = async () => {
   try {
-    await sendQuoteRequestEmail(
-      'gwgekawar@gmail.com', // Replace with a valid email for testing
-      'Syre',
-      'Homecity Holdings',
-      'Organic Coffee Beans',
-      50,
-      'test-quote-id-1234'
+    await sendQuoteResponseEmail(
+      'imgkamau@gmail.com', // Replace with a valid email
+      'John Doe',               // buyerName
+      'Test Product',           // productName
+      99.99,                    // price (ensure it's a number)
+      'Test notes for the quote response.', // notes (ensure it's a string)
+      'test-quote-id-1234'      // quoteId
     );
-    logger.info('Test quote request email sent successfully.');
+    logger.info('Test quote response email sent successfully.');
   } catch (error) {
-    logger.error('Failed to send test quote request email:', error);
+    logger.error('Failed to send test quote response email:', error);
   }
 };
 
 // Execute the test
-testSendQuoteRequestEmail();
+testSendQuoteResponseEmail();

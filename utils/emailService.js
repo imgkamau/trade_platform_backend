@@ -1,61 +1,103 @@
 // utils/emailService.js
 
-const nodemailer = require('nodemailer');
+require('dotenv').config(); // Load environment variables at the entry point
 const sgMail = require('@sendgrid/mail');
 const logger = require('./logger'); // Ensure you have a logger utility
-require('dotenv').config(); // To load environment variables
 
-// **Nodemailer Configuration for Verification Emails**
-const nodemailerTransporter = nodemailer.createTransport({
-  service: 'gmail', // Use 'gmail' if you're using Gmail
-  auth: {
-    user: process.env.EMAIL_USER, // Your email address (e.g., xxxx@ke-eutrade.org)
-    pass: process.env.EMAIL_PASS, // Your email password or app-specific password
-  },
-});
+// Set SendGrid API Key
+const sendGridApiKey = process.env.SENDGRID_API_KEY;
+if (!sendGridApiKey) {
+  throw new Error('SENDGRID_API_KEY is not set in environment variables.');
+}
+sgMail.setApiKey(sendGridApiKey);
 
-// Verify Nodemailer Transporter Configuration
-nodemailerTransporter.verify((error, success) => {
-  if (error) {
-    logger.error('Nodemailer transporter configuration error:', error);
-  } else {
-    logger.info('Nodemailer transporter is configured successfully.');
-  }
-});
+// Verify that EMAIL_FROM and FRONTEND_URL are set
+const emailFrom = process.env.EMAIL_FROM;
+const frontendUrl = process.env.FRONTEND_URL;
 
-// **SendGrid Configuration for Quotation Request Emails**
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+if (!emailFrom) {
+  throw new Error('EMAIL_FROM is not set in environment variables.');
+}
+if (!frontendUrl) {
+  throw new Error('FRONTEND_URL is not set in environment variables.');
+}
 
-// **Function: Send Verification Email using Nodemailer**
+/**
+ * Send Verification Email using SendGrid
+ * @param {string} email - Recipient's email address
+ * @param {string} token - Verification token
+ */
 const sendVerificationEmail = async (email, token) => {
-  const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+  // Parameter validation
+  if (!email || typeof email !== 'string') {
+    throw new Error('Invalid or missing email address.');
+  }
+  if (!token || typeof token !== 'string') {
+    throw new Error('Invalid or missing verification token.');
+  }
 
-  const mailOptions = {
-    from: `"Your App Name" <${process.env.EMAIL_USER}>`, // Sender address
-    to: email, // Recipient address
+  const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
+
+  const msg = {
+    to: email,
+    from: `"Your App Name" <${emailFrom}>`,
     subject: 'Email Verification',
     html: `
+      <p>Hello,</p>
       <p>Please verify your email by clicking the link below:</p>
       <a href="${verificationLink}">Verify Email</a>
+      <p>If you did not sign up for this account, you can ignore this email.</p>
+      <p>Best regards,<br/>Your App Name Team</p>
     `,
   };
 
   try {
-    await nodemailerTransporter.sendMail(mailOptions);
+    await sgMail.send(msg);
     logger.info(`Verification email sent to ${email}`);
   } catch (error) {
-    logger.error('Error sending verification email:', error);
+    logger.error(
+      `Error sending verification email to ${email}:`,
+      error.response ? error.response.body : error
+    );
     throw new Error('Email could not be sent');
   }
 };
 
-// **Function: Send Quote Request Email using SendGrid**
+/**
+ * Send Quote Request Email using SendGrid
+ * @param {string} email - Seller's email address
+ * @param {string} sellerName - Seller's name
+ * @param {string} buyerName - Buyer's name
+ * @param {string} productName - Product name
+ * @param {number} quantity - Quantity requested
+ * @param {string} quoteId - Quote ID
+ */
 const sendQuoteRequestEmail = async (email, sellerName, buyerName, productName, quantity, quoteId) => {
-  const quoteLink = `${process.env.FRONTEND_URL}/quotes/${quoteId}`; // Adjust based on your frontend routing
+  // Parameter validation
+  if (!email || typeof email !== 'string') {
+    throw new Error('Invalid or missing email address.');
+  }
+  if (!sellerName || typeof sellerName !== 'string') {
+    throw new Error('Invalid or missing seller name.');
+  }
+  if (!buyerName || typeof buyerName !== 'string') {
+    throw new Error('Invalid or missing buyer name.');
+  }
+  if (!productName || typeof productName !== 'string') {
+    throw new Error('Invalid or missing product name.');
+  }
+  if (typeof quantity !== 'number' || isNaN(quantity) || quantity <= 0) {
+    throw new Error('Invalid quantity value.');
+  }
+  if (!quoteId || typeof quoteId !== 'string') {
+    throw new Error('Invalid or missing quote ID.');
+  }
+
+  const quoteLink = `${frontendUrl}/quotes/${quoteId}`;
 
   const msg = {
     to: email,
-    from: `"Trade Platform" <${process.env.EMAIL_FROM}>`, // Sender address (e.g., xxxxx@ke-eutrade.org)
+    from: `"Trade Platform" <${emailFrom}>`,
     subject: 'New Quote Request Received',
     text: `Hello ${sellerName},
 
@@ -87,17 +129,49 @@ Trade Platform Team`,
     await sgMail.send(msg);
     logger.info(`Quote request email sent to ${email} for quote ID: ${quoteId}`);
   } catch (error) {
-    logger.error(`Error sending quote request email to ${email}:`, error);
+    logger.error(
+      `Error sending quote request email to ${email}:`,
+      error.response ? error.response.body : error
+    );
     throw new Error('Quote request email could not be sent');
   }
 };
 
+/**
+ * Send Quote Response Email using SendGrid
+ * @param {string} email - Buyer's email address
+ * @param {string} buyerName - Buyer's name
+ * @param {string} productName - Product name
+ * @param {number} price - Price per unit
+ * @param {string} notes - Seller's notes
+ * @param {string} quoteId - Quote ID
+ */
 const sendQuoteResponseEmail = async (email, buyerName, productName, price, notes, quoteId) => {
-  const quoteLink = `${process.env.FRONTEND_URL}/quotes/${quoteId}`;
+  // Parameter validation
+  if (!email || typeof email !== 'string') {
+    throw new Error('Invalid or missing email address.');
+  }
+  if (!buyerName || typeof buyerName !== 'string') {
+    throw new Error('Invalid or missing buyer name.');
+  }
+  if (!productName || typeof productName !== 'string') {
+    throw new Error('Invalid or missing product name.');
+  }
+  if (typeof price !== 'number' || isNaN(price) || price < 0) {
+    throw new Error('Invalid price value.');
+  }
+  if (typeof notes !== 'string') {
+    notes = '';
+  }
+  if (!quoteId || typeof quoteId !== 'string') {
+    throw new Error('Invalid or missing quote ID.');
+  }
+
+  const quoteLink = `${frontendUrl}/quotes/${quoteId}`;
 
   const msg = {
     to: email,
-    from: `"Trade Platform" <${process.env.EMAIL_FROM}>`,
+    from: `"Trade Platform" <${emailFrom}>`,
     subject: 'Your Quote Request Has Been Responded To',
     text: `Hello ${buyerName},
 
@@ -129,9 +203,16 @@ Trade Platform Team`,
     await sgMail.send(msg);
     logger.info(`Quote response email sent to buyer: ${email} for Quote ID=${quoteId}`);
   } catch (error) {
-    logger.error(`Error sending quote response email to buyer (${email}): ${error.message}`, error);
+    logger.error(
+      `Error sending quote response email to buyer (${email}):`,
+      error.response ? error.response.body : error
+    );
     throw new Error('Failed to send quote response email to buyer.');
   }
 };
 
-module.exports = { sendVerificationEmail, sendQuoteRequestEmail, sendQuoteResponseEmail };
+module.exports = {
+  sendVerificationEmail,
+  sendQuoteRequestEmail,
+  sendQuoteResponseEmail,
+};
