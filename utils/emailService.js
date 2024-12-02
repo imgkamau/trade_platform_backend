@@ -1,10 +1,29 @@
 // utils/emailService.js
 
-require('dotenv').config(); // Load environment variables at the entry point
+require('dotenv').config(); // Load environment variables
+const nodemailer = require('nodemailer');
 const sgMail = require('@sendgrid/mail');
 const logger = require('./logger'); // Ensure you have a logger utility
 
-// Set SendGrid API Key
+// Nodemailer Configuration for Verification Emails
+const nodemailerTransporter = nodemailer.createTransport({
+  service: 'gmail', // Use 'gmail' if you're using Gmail or your email service provider
+  auth: {
+    user: process.env.EMAIL_USER, // Your email address (e.g., xxxx@example.com)
+    pass: process.env.EMAIL_PASS, // Your email password or app-specific password
+  },
+});
+
+// Verify Nodemailer Transporter Configuration
+nodemailerTransporter.verify((error, success) => {
+  if (error) {
+    logger.error('Nodemailer transporter configuration error:', error);
+  } else {
+    logger.info('Nodemailer transporter is configured successfully.');
+  }
+});
+
+// SendGrid Configuration for Quote Emails
 const sendGridApiKey = process.env.SENDGRID_API_KEY;
 if (!sendGridApiKey) {
   throw new Error('SENDGRID_API_KEY is not set in environment variables.');
@@ -22,11 +41,7 @@ if (!frontendUrl) {
   throw new Error('FRONTEND_URL is not set in environment variables.');
 }
 
-/**
- * Send Verification Email using SendGrid
- * @param {string} email - Recipient's email address
- * @param {string} token - Verification token
- */
+// Function: Send Verification Email using Nodemailer
 const sendVerificationEmail = async (email, token) => {
   // Parameter validation
   if (!email || typeof email !== 'string') {
@@ -38,9 +53,9 @@ const sendVerificationEmail = async (email, token) => {
 
   const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
 
-  const msg = {
-    to: email,
-    from: `"Your App Name" <${emailFrom}>`,
+  const mailOptions = {
+    from: `"Your App Name" <${process.env.EMAIL_USER}>`, // Sender address
+    to: email, // Recipient address
     subject: 'Email Verification',
     html: `
       <p>Hello,</p>
@@ -52,26 +67,15 @@ const sendVerificationEmail = async (email, token) => {
   };
 
   try {
-    await sgMail.send(msg);
+    await nodemailerTransporter.sendMail(mailOptions);
     logger.info(`Verification email sent to ${email}`);
   } catch (error) {
-    logger.error(
-      `Error sending verification email to ${email}:`,
-      error.response ? error.response.body : error
-    );
+    logger.error('Error sending verification email:', error);
     throw new Error('Email could not be sent');
   }
 };
 
-/**
- * Send Quote Request Email using SendGrid
- * @param {string} email - Seller's email address
- * @param {string} sellerName - Seller's name
- * @param {string} buyerName - Buyer's name
- * @param {string} productName - Product name
- * @param {number} quantity - Quantity requested
- * @param {string} quoteId - Quote ID
- */
+// Function: Send Quote Request Email using SendGrid
 const sendQuoteRequestEmail = async (email, sellerName, buyerName, productName, quantity, quoteId) => {
   // Parameter validation
   if (!email || typeof email !== 'string') {
@@ -137,15 +141,7 @@ Trade Platform Team`,
   }
 };
 
-/**
- * Send Quote Response Email using SendGrid
- * @param {string} email - Buyer's email address
- * @param {string} buyerName - Buyer's name
- * @param {string} productName - Product name
- * @param {number} price - Price per unit
- * @param {string} notes - Seller's notes
- * @param {string} quoteId - Quote ID
- */
+// Function: Send Quote Response Email using SendGrid
 const sendQuoteResponseEmail = async (email, buyerName, productName, price, notes, quoteId) => {
   // Parameter validation
   if (!email || typeof email !== 'string') {
