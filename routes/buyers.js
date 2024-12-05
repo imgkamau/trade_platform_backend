@@ -4,6 +4,59 @@ const router = express.Router();
 const db = require('../db');
 const authMiddleware = require('../middleware/auth');
 
+
+// GET: Retrieve the buyer's profile
+router.get('/profile', authMiddleware, async (req, res) => {
+  const buyerId = req.user.id;
+
+  // Ensure the user is a buyer
+  if (req.user.role !== 'buyer') {
+    return res.status(403).json({ message: 'Access denied. Only buyers can access their profile.' });
+  }
+
+  try {
+    // Fetch buyer's profile
+    const buyerResult = await db.execute({
+      sqlText: `SELECT * FROM trade.gwtrade.BUYERS WHERE USER_ID = ?`,
+      binds: [buyerId],
+    });
+
+    const buyerRows = buyerResult.rows || buyerResult;
+    if (!buyerRows || buyerRows.length === 0) {
+      return res.status(404).json({ message: 'Buyer profile not found.' });
+    }
+
+    const buyerProfile = buyerRows[0];
+
+    // Fetch user details from USERS table
+    const userResult = await db.execute({
+      sqlText: `SELECT EMAIL, FULL_NAME FROM trade.gwtrade.USERS WHERE USER_ID = ?`,
+      binds: [buyerId],
+    });
+
+    const userRows = userResult.rows || userResult;
+    if (!userRows || userRows.length === 0) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    const userDetails = userRows[0];
+
+    // Combine buyer profile and user details
+    const profileData = {
+      user_id: buyerId,
+      email: userDetails.EMAIL,
+      full_name: userDetails.FULL_NAME,
+      productInterests: buyerProfile.PRODUCT_INTERESTS || [],
+      location: buyerProfile.LOCATION || '',
+    };
+
+    res.json({ profile: profileData });
+  } catch (error) {
+    console.error('Error fetching buyer profile:', error);
+    res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+});
+
 // PUT: Update buyer's product interests
 router.put('/profile', authMiddleware, async (req, res) => {
   const buyerId = req.user.id;
