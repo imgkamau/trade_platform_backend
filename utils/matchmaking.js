@@ -1,16 +1,18 @@
 // utils/matchmaking.js
 
-const matchmaking = {};
-
-matchmaking.findMatches = async (buyer, db) => {
+// Define the findMatches function
+async function findMatches(buyer, db) {
+  console.log('Matchmaking.findMatches called');
   // Validate buyer data
   if (!buyer || !buyer.PRODUCT_INTERESTS) {
+    console.error('Invalid buyer data: PRODUCT_INTERESTS is required.');
     throw new Error('Invalid buyer data: PRODUCT_INTERESTS is required.');
   }
 
   // Parse and normalize buyer's product interests
   let buyerInterests = buyer.PRODUCT_INTERESTS;
 
+  console.log('Parsing buyer interests');
   // Parse JSON if necessary
   if (typeof buyerInterests === 'string') {
     try {
@@ -27,9 +29,11 @@ matchmaking.findMatches = async (buyer, db) => {
 
   // Normalize buyer interests: lowercase and trim whitespace
   buyerInterests = buyerInterests.map(item => item.toLowerCase().trim());
+  console.log('Buyer interests:', buyerInterests);
 
   // Fetch all products offered by sellers
   try {
+    console.log('Fetching products from database');
     const productsResult = await db.execute({
       sqlText: `
         SELECT 
@@ -39,10 +43,12 @@ matchmaking.findMatches = async (buyer, db) => {
         FROM trade.gwtrade.PRODUCTS p
         JOIN trade.gwtrade.USERS u ON p.SELLER_ID = u.USER_ID
         WHERE u.ROLE = 'seller'
+        LIMIT 1000
       `,
     });
 
     const products = productsResult.rows || productsResult;
+    console.log(`Fetched ${products.length} products from database`);
 
     // Map sellers to their products
     const sellerProductsMap = {};
@@ -91,6 +97,7 @@ matchmaking.findMatches = async (buyer, db) => {
     console.error('Error fetching products for matchmaking:', error);
     throw new Error('Failed to fetch seller products for matchmaking.');
   }
-};
+}
 
-module.exports = matchmaking;
+// Export the findMatches function directly
+module.exports = findMatches;

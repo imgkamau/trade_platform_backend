@@ -1,23 +1,25 @@
 // models/userModel.js
 
-const connection = require('../db');
+const db = require('../db'); // Ensure db is correctly required
 
-exports.getBuyerProfile = (userId) => {
-  return new Promise((resolve, reject) => {
-    const sql = `SELECT * FROM trade.gwtrade.buyers WHERE USER_ID = ?`;
-    connection.execute({
+exports.getBuyerProfile = async (userId) => {
+  console.log(`Fetching buyer profile for user ID: ${userId}`);
+  try {
+    const sql = `SELECT * FROM trade.gwtrade.BUYERS WHERE USER_ID = ?`;
+    const result = await db.execute({
       sqlText: sql,
       binds: [userId],
-      complete: (err, stmt, rows) => {
-        if (err) {
-          console.error('Error fetching buyer profile:', err);
-          return reject(err);
-        }
-        if (!rows || rows.length === 0) {
-          return resolve(null); // Buyer profile not found
-        }
-        resolve(rows[0]);
-      },
     });
-  });
+
+    const rows = result.rows || result;
+    if (!rows || rows.length === 0) {
+      console.log('No buyer profile found');
+      return null; // Buyer profile not found
+    }
+    console.log('Buyer profile fetched successfully');
+    return rows[0];
+  } catch (err) {
+    console.error('Error fetching buyer profile:', err);
+    throw err;
+  }
 };
