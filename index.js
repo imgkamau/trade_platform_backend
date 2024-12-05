@@ -30,6 +30,7 @@ const inquiriesRouter = require('./routes/inquiries'); // Inquiries Router
 const contactsRouter = require('./routes/contacts'); // Contacts Router
 const scheduler = require('./utils/scheduler'); // Import the scheduler
 const sellerProductsRouter = require('./routes/sellerProducts');
+const buyersRouter = require('./routes/buyers');
 const matchmakingRoutes = require('./routes/matchmaking');
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -108,6 +109,7 @@ app.use('/api/contacts', contactsRouter);
 app.use('/api/seller-products', sellerProductsRouter);
 app.use('/api', verifyCompanyRouter);
 app.use('/api/activities', activitiesRouter);
+app.use('/api/buyers', buyersRouter);
 app.use('/api', matchmakingRoutes);
 
 // **9. Root Route**

@@ -1,7 +1,13 @@
 // utils/matchmaking.js
 
-// Function to calculate similarity score between a buyer and a seller
-function calculateSimilarity(buyer, seller) {
+const matchmaking = {};
+
+matchmaking.findMatches = async (buyer, db) => {
+  // Validate buyer data
+  if (!buyer || !buyer.PRODUCT_INTERESTS) {
+    throw new Error('Invalid buyer data: PRODUCT_INTERESTS is required.');
+  }
+
   // Parse and normalize buyer's product interests
   let buyerInterests = buyer.PRODUCT_INTERESTS;
 
@@ -22,73 +28,69 @@ function calculateSimilarity(buyer, seller) {
   // Normalize buyer interests: lowercase and trim whitespace
   buyerInterests = buyerInterests.map(item => item.toLowerCase().trim());
 
-  // Parse and normalize seller's products offered
-  let sellerProducts = seller.PRODUCTS_OFFERED;
+  // Fetch all products offered by sellers
+  try {
+    const productsResult = await db.execute({
+      sqlText: `
+        SELECT 
+          p.SELLER_ID,
+          p.NAME AS PRODUCT_NAME,
+          u.COMPANY_NAME
+        FROM trade.gwtrade.PRODUCTS p
+        JOIN trade.gwtrade.USERS u ON p.SELLER_ID = u.USER_ID
+        WHERE u.ROLE = 'seller'
+      `,
+    });
 
-  // Parse JSON if necessary
-  if (typeof sellerProducts === 'string') {
-    try {
-      sellerProducts = JSON.parse(sellerProducts);
-    } catch (e) {
-      console.error('Error parsing seller PRODUCTS_OFFERED:', e);
-      sellerProducts = [];
-    }
-  }
+    const products = productsResult.rows || productsResult;
 
-  if (!Array.isArray(sellerProducts)) {
-    sellerProducts = [];
-  }
-
-  // Normalize seller products: lowercase and trim whitespace
-  sellerProducts = sellerProducts.map(item => item.toLowerCase().trim());
-
-  // Find shared products between buyer and seller
-  const sharedProducts = buyerInterests.filter(product =>
-    sellerProducts.includes(product)
-  );
-
-  // Calculate similarity score (e.g., number of shared products)
-  const score = sharedProducts.length;
-
-  return { score, sharedProducts };
-}
-
-// Function to find matches for a buyer from a list of sellers
-exports.findMatches = (buyer, sellers) => {
-  // Validate buyer data
-  if (!buyer || !buyer.PRODUCT_INTERESTS) {
-    throw new Error('Invalid buyer data: PRODUCT_INTERESTS is required.');
-  }
-
-  // Validate sellers data
-  if (!Array.isArray(sellers)) {
-    throw new Error('Invalid sellers data: Expected an array of sellers.');
-  }
-
-  const matches = sellers
-    .map(seller => {
-      // Validate seller data
-      if (!seller || !seller.PRODUCTS_OFFERED) {
-        return null;
-      }
-
-      const { score, sharedProducts } = calculateSimilarity(buyer, seller);
-
-      if (score > 0) {
-        return {
-          seller_id: seller.USER_ID,
-          seller_company: seller.COMPANY_NAME || 'Unknown Company',
-          shared_products: sharedProducts,
-          score,
+    // Map sellers to their products
+    const sellerProductsMap = {};
+    products.forEach(product => {
+      const sellerId = product.SELLER_ID;
+      if (!sellerProductsMap[sellerId]) {
+        sellerProductsMap[sellerId] = {
+          seller_id: sellerId,
+          seller_company: product.COMPANY_NAME || 'Unknown Company',
+          products_offered: [],
         };
-      } else {
-        return null;
       }
-    })
-    .filter(match => match !== null);
+      sellerProductsMap[sellerId].products_offered.push(product.PRODUCT_NAME);
+    });
 
-  // Sort matches by score in descending order
-  matches.sort((a, b) => b.score - a.score);
+    // Find matches
+    const matches = Object.values(sellerProductsMap)
+      .map(seller => {
+        // Normalize seller products
+        const sellerProducts = seller.products_offered.map(item => item.toLowerCase().trim());
 
-  return matches;
+        // Find shared products between buyer and seller
+        const sharedProducts = buyerInterests.filter(product =>
+          sellerProducts.includes(product)
+        );
+
+        // Calculate similarity score
+        const score = sharedProducts.length;
+
+        if (score > 0) {
+          return {
+            seller_id: seller.seller_id,
+            seller_company: seller.seller_company,
+            shared_products: sharedProducts,
+            score,
+          };
+        } else {
+          return null;
+        }
+      })
+      .filter(match => match !== null)
+      .sort((a, b) => b.score - a.score);
+
+    return matches;
+  } catch (error) {
+    console.error('Error fetching products for matchmaking:', error);
+    throw new Error('Failed to fetch seller products for matchmaking.');
+  }
 };
+
+module.exports = matchmaking;
