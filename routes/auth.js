@@ -81,30 +81,13 @@ router.post(
     body('role')
       .isIn(['seller', 'buyer'])
       .withMessage('Role must be either seller or buyer'),
-    // For sellers, company_name is required
-    body('company_name')
-      .if(body('role').equals('seller'))
-      .notEmpty()
-      .withMessage('Company name is required for sellers')
-      .trim(),
-    // For sellers, company_description is required
+    body('company_name').notEmpty().withMessage('Company name is required').trim(),
     body('company_description')
-      .if(body('role').equals('seller'))
       .notEmpty()
-      .withMessage('Company description is required for sellers')
+      .withMessage('Company description is required')
       .trim(),
-    // For sellers, phone_number is required
-    body('phone_number')
-      .if(body('role').equals('seller'))
-      .notEmpty()
-      .withMessage('Phone number is required for sellers')
-      .trim(),
-    // For sellers, address is required
-    body('address')
-      .if(body('role').equals('seller'))
-      .notEmpty()
-      .withMessage('Address is required for sellers')
-      .trim(),
+    body('phone_number').notEmpty().withMessage('Phone number is required').trim(),
+    body('address').notEmpty().withMessage('Address is required').trim(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -137,11 +120,7 @@ router.post(
       });
 
       if (existingUsernameResult && existingUsernameResult.length > 0) {
-        validationErrors.push({
-          msg: 'Username already exists',
-          param: 'username',
-          location: 'body',
-        });
+        validationErrors.push({ msg: 'Username already exists', param: 'username', location: 'body' });
       }
 
       // Check email
@@ -153,11 +132,7 @@ router.post(
       });
 
       if (existingEmailResult && existingEmailResult.length > 0) {
-        validationErrors.push({
-          msg: 'Email already exists',
-          param: 'email',
-          location: 'body',
-        });
+        validationErrors.push({ msg: 'Email already exists', param: 'email', location: 'body' });
       }
 
       if (validationErrors.length > 0) {
@@ -211,33 +186,6 @@ router.post(
         ],
       });
 
-      // Create a profile in the BUYERS or SELLERS table based on the role
-      if (role === 'buyer') {
-        await db.execute({
-          sqlText: `
-            INSERT INTO trade.gwtrade.BUYERS (
-              USER_ID,
-              PRODUCT_INTERESTS,
-              LOCATION
-            ) VALUES (?, PARSE_JSON('[]'), '')
-          `,
-          binds: [USER_ID],
-        });
-      } else if (role === 'seller') {
-        await db.execute({
-          sqlText: `
-            INSERT INTO trade.gwtrade.SELLERS (
-              USER_ID,
-              PRODUCTS_OFFERED,
-              LOCATION,
-              CERTIFICATIONS,
-              TARGET_MARKETS
-            ) VALUES (?, PARSE_JSON('[]'), '', PARSE_JSON('[]'), PARSE_JSON('[]'))
-          `,
-          binds: [USER_ID],
-        });
-      }
-
       // Send verification email
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const verificationLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
@@ -257,9 +205,7 @@ router.post(
       await transporter.sendMail(mailOptions);
       logger.info(`Verification email sent to ${email}`);
 
-      res.status(201).json({
-        message: 'User registered successfully. Please verify your email.',
-      });
+      res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
     } catch (error) {
       logger.error('Registration error:', error);
       const errorDetails = [{ msg: error.message }];
