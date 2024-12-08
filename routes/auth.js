@@ -18,13 +18,11 @@ const cors = require('cors'); // CORS middleware
 router.use(helmet());
 
 // Apply CORS middleware
-router.use(
-  cors({
-    origin: 'https://www.ke-eutrade.org', // Replace with your frontend URL
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+router.use(cors({
+  origin: 'https://www.ke-eutrade.org', // Replace with your frontend URL
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Nodemailer transporter configuration
 const transporter = nodemailer.createTransport({
@@ -224,7 +222,9 @@ router.post(
  */
 router.get(
   '/verify-email',
-  [query('token').notEmpty().withMessage('Verification token is required').trim()],
+  [
+    query('token').notEmpty().withMessage('Verification token is required').trim(),
+  ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -379,7 +379,12 @@ router.post(
  */
 router.post(
   '/forgot-password',
-  [body('email').isEmail().withMessage('Please provide a valid email address').normalizeEmail()],
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+      .normalizeEmail(),
+  ],
   async (req, res) => {
     // Validate input
     const errors = validationResult(req);
@@ -473,7 +478,11 @@ router.post(
       .withMessage('Token is required')
       .isLength({ min: 64, max: 64 })
       .withMessage('Invalid token format'),
-    body('id').notEmpty().withMessage('User ID is required').isUUID().withMessage('Invalid User ID format'),
+    body('id')
+      .notEmpty()
+      .withMessage('User ID is required')
+      .isUUID()
+      .withMessage('Invalid User ID format'),
     body('password')
       .isLength({ min: 8 })
       .withMessage('Password must be at least 8 characters long')
