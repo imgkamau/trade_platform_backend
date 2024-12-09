@@ -81,25 +81,22 @@ router.post(
     body('role')
       .isIn(['seller', 'buyer'])
       .withMessage('Role must be either seller or buyer'),
-    // For sellers, company_name is required
+    // Only required for seller
     body('company_name')
       .if(body('role').equals('seller'))
       .notEmpty()
       .withMessage('Company name is required for sellers')
       .trim(),
-    // For sellers, company_description is required
     body('company_description')
       .if(body('role').equals('seller'))
       .notEmpty()
       .withMessage('Company description is required for sellers')
       .trim(),
-    // For sellers, phone_number is required
     body('phone_number')
       .if(body('role').equals('seller'))
       .notEmpty()
       .withMessage('Phone number is required for sellers')
       .trim(),
-    // For sellers, address is required
     body('address')
       .if(body('role').equals('seller'))
       .notEmpty()
@@ -201,41 +198,46 @@ router.post(
           email,
           full_name,
           role,
-          company_name,
-          company_description,
-          phone_number,
-          address,
+          company_name || '', // if buyer, can be empty string
+          company_description || '',
+          phone_number || '',
+          address || '',
           false, // IS_EMAIL_VERIFIED
           verificationToken,
           tokenExpires,
         ],
       });
 
-      // Create a profile in the BUYERS or SELLERS table based on the role
-      if (role === 'buyer') {
-        await db.execute({
-          sqlText: `
-            INSERT INTO trade.gwtrade.BUYERS (
-              USER_ID,
-              PRODUCT_INTERESTS,
-              LOCATION
-            ) VALUES (?, PARSE_JSON('[]'), '')
-          `,
-          binds: [USER_ID],
-        });
-      } else if (role === 'seller') {
-        await db.execute({
-          sqlText: `
-            INSERT INTO trade.gwtrade.SELLERS (
-              USER_ID,
-              PRODUCTS_OFFERED,
-              LOCATION,
-              CERTIFICATIONS,
-              TARGET_MARKETS
-            ) VALUES (?, PARSE_JSON('[]'), '', PARSE_JSON('[]'), PARSE_JSON('[]'))
-          `,
-          binds: [USER_ID],
-        });
+      // Insert into BUYERS or SELLERS table
+      try {
+        if (role === 'buyer') {
+          await db.execute({
+            sqlText: `
+              INSERT INTO trade.gwtrade.BUYERS (
+                USER_ID,
+                PRODUCT_INTERESTS,
+                LOCATION
+              ) VALUES (?, ARRAY_CONSTRUCT(), '')
+            `,
+            binds: [USER_ID],
+          });
+        } else if (role === 'seller') {
+          await db.execute({
+            sqlText: `
+              INSERT INTO trade.gwtrade.SELLERS (
+                USER_ID,
+                PRODUCTS_OFFERED,
+                LOCATION,
+                CERTIFICATIONS,
+                TARGET_MARKETS
+              ) VALUES (?, ARRAY_CONSTRUCT(), '', ARRAY_CONSTRUCT(), ARRAY_CONSTRUCT())
+            `,
+            binds: [USER_ID],
+          });
+        }
+      } catch (buyerSellerErr) {
+        logger.error('Error inserting into BUYERS/SELLERS table:', buyerSellerErr);
+        throw new Error('Error creating buyer/seller profile.');
       }
 
       // Send verification email
@@ -327,7 +329,6 @@ router.get(
         binds: [user.USER_ID],
       });
 
-      // Respond with success message
       res.json({ message: 'Email verified successfully' });
     } catch (error) {
       logger.error('Email verification error:', error);
@@ -374,7 +375,6 @@ router.post(
 
       const user = userResult[0];
 
-      // Check if email is verified
       if (!user.IS_EMAIL_VERIFIED) {
         return sendErrorResponse(res, 400, 'Email is not verified');
       }
@@ -391,30 +391,23 @@ router.post(
         },
       };
 
-      jwt.sign(
-        payload,
-        process.env.JWT_SECRET,
-        { expiresIn: '1h' },
-        (err, token) => {
-          if (err) {
-            logger.error('JWT Sign error:', err);
-            throw err;
-          }
-
-          // Exclude sensitive information before sending the user object
-          const userResponse = {
-            id: user.USER_ID,
-            username: user.USERNAME,
-            email: user.EMAIL,
-            full_name: user.FULL_NAME,
-            role: user.ROLE,
-            isEmailVerified: user.IS_EMAIL_VERIFIED,
-            // Include other necessary fields, but exclude sensitive ones like PASSWORD_HASH
-          };
-
-          res.json({ token, user: userResponse });
+      jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
+        if (err) {
+          logger.error('JWT Sign error:', err);
+          throw err;
         }
-      );
+
+        const userResponse = {
+          id: user.USER_ID,
+          username: user.USERNAME,
+          email: user.EMAIL,
+          full_name: user.FULL_NAME,
+          role: user.ROLE,
+          isEmailVerified: user.IS_EMAIL_VERIFIED,
+        };
+
+        res.json({ token, user: userResponse });
+      });
     } catch (error) {
       logger.error('Login error:', error);
       const errorDetails = [{ msg: error.message }];
@@ -435,7 +428,6 @@ router.post(
   '/forgot-password',
   [body('email').isEmail().withMessage('Please provide a valid email address').normalizeEmail()],
   async (req, res) => {
-    // Validate input
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       logger.warn('Forgot password validation failed', { errors: errors.array() });
@@ -445,7 +437,6 @@ router.post(
     const { email } = req.body;
 
     try {
-      // Check if user exists
       const checkUserSql = 'SELECT USER_ID, EMAIL FROM trade.gwtrade.USERS WHERE EMAIL = ?';
       logger.info('Executing SQL:', checkUserSql);
       const userResult = await db.execute({
@@ -454,7 +445,6 @@ router.post(
       });
 
       if (!userResult || userResult.length === 0) {
-        // For security, don't reveal that email doesn't exist
         logger.info(`Password reset requested for non-existing email: ${email}`);
         return res.status(200).json({ message: 'Password reset email sent' });
       }
@@ -462,13 +452,10 @@ router.post(
       const user = userResult[0];
       const userId = user.USER_ID;
 
-      // Generate a reset token
       const resetToken = crypto.randomBytes(32).toString('hex');
-      // Hash the token before storing
       const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
-      const resetTokenExpiry = new Date(Date.now() + 24 * 3600000).toISOString(); // 24 hours from now in UTC
+      const resetTokenExpiry = new Date(Date.now() + 24 * 3600000).toISOString();
 
-      // Update user record with reset token and expiry
       const updateUserSql = `
         UPDATE trade.gwtrade.USERS
         SET RESET_PASSWORD_TOKEN = ?, RESET_PASSWORD_EXPIRES = ?
@@ -480,11 +467,9 @@ router.post(
         binds: [resetTokenHash, resetTokenExpiry, userId],
       });
 
-      // Create reset URL
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}&id=${userId}`;
 
-      // Email content
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: user.EMAIL,
@@ -497,7 +482,6 @@ router.post(
         `,
       };
 
-      // Send email
       await transporter.sendMail(mailOptions);
 
       logger.info(`Password reset email sent to ${user.EMAIL}`);
@@ -539,7 +523,6 @@ router.post(
       .withMessage('Password must contain at least one special character'),
   ],
   async (req, res) => {
-    // Validate input
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       logger.warn('Reset password validation failed', { errors: errors.array() });
@@ -549,7 +532,6 @@ router.post(
     const { token, id, password } = req.body;
 
     try {
-      // Hash the received token to compare with stored hash
       const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
       logger.info('Password Reset Attempt:', {
@@ -557,7 +539,6 @@ router.post(
         resetTokenHash: resetTokenHash,
       });
 
-      // Query to find the user with the matching reset token and unexpired
       const checkTokenSql = `
         SELECT USER_ID, EMAIL, RESET_PASSWORD_EXPIRES 
         FROM trade.gwtrade.USERS
@@ -580,11 +561,9 @@ router.post(
       const user = userResult[0];
       const userId = user.USER_ID;
 
-      // Hash the new password
       const salt = await bcrypt.genSalt(12);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      // Update user's password and clear reset token fields
       const updatePasswordSql = `
         UPDATE trade.gwtrade.USERS
         SET PASSWORD_HASH = ?, RESET_PASSWORD_TOKEN = NULL, RESET_PASSWORD_EXPIRES = NULL
@@ -599,7 +578,6 @@ router.post(
         binds: [hashedPassword, userId],
       });
 
-      // Send a confirmation email to the user
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: user.EMAIL,
