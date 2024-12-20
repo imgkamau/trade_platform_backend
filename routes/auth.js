@@ -86,6 +86,12 @@ router.post(
       .trim(),
     body('phone_number').notEmpty().withMessage('Phone number is required').trim(),
     body('address').notEmpty().withMessage('Address is required').trim(),
+    body('years_of_experience')
+      .if(body('role').equals('seller'))
+      .notEmpty()
+      .withMessage('Years of experience is required for sellers')
+      .isInt({ min: 0, max: 100 })
+      .withMessage('Years of experience must be between 0 and 100'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -103,6 +109,7 @@ router.post(
       company_description,
       phone_number,
       address,
+      years_of_experience,
     } = req.body;
 
     try {
@@ -161,8 +168,9 @@ router.post(
           ADDRESS,
           IS_EMAIL_VERIFIED,
           EMAIL_VERIFICATION_TOKEN,
-          EMAIL_VERIFICATION_EXPIRES
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          EMAIL_VERIFICATION_EXPIRES,
+          YEARS_OF_EXPERIENCE
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       logger.info('Executing SQL:', insertUserSql);
       await db.execute({
@@ -181,6 +189,7 @@ router.post(
           false, // IS_EMAIL_VERIFIED
           verificationToken,
           tokenExpires,
+          role === 'seller' ? years_of_experience : null,
         ],
       });
 
