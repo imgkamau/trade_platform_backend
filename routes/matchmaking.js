@@ -1,11 +1,8 @@
-// routes/matchmaking.js
-
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const authMiddleware = require('../middleware/auth'); // Middleware that sets req.user.id and req.user.role
+const authMiddleware = require('../middleware/auth');
 const userModel = require('../models/userModel');
-// Import findMatches function
 const findMatches = require('../utils/matchmaking');
 
 router.get('/matchmaking', authMiddleware, async (req, res) => {
