@@ -10,7 +10,7 @@ const customFormat = printf(({ level, message, timestamp }) => {
 
 // Create the logger instance
 const logger = createLogger({
-  level: 'info', // Log level: 'error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'
+  level: 'debug', // Log level: 'error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'
   format: combine(
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     customFormat

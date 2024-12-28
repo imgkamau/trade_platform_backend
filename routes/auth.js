@@ -86,16 +86,17 @@ router.post(
       .trim(),
     body('phone_number').notEmpty().withMessage('Phone number is required').trim(),
     body('address').notEmpty().withMessage('Address is required').trim(),
-    body('years_of_experience')
-      .if(body('role').equals('seller'))
-      .notEmpty()
-      .withMessage('Years of experience is required for sellers')
-      .isInt({ min: 0, max: 100 })
-      .withMessage('Years of experience must be between 0 and 100'),
   ],
   async (req, res) => {
+    console.log('=== Registration Request Received ===');
+    console.log('Request Body:', {
+      ...req.body,
+      password: '[REDACTED]' // Don't log passwords
+    });
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation Errors:', errors.array());
       return sendErrorResponse(res, 400, 'Validation failed', errors.array());
     }
 
@@ -109,26 +110,22 @@ router.post(
       company_description,
       phone_number,
       address,
-      years_of_experience,
     } = req.body;
 
     try {
-      // Check for username and email uniqueness
-      let validationErrors = [];
-
-      // Check username
+      console.log('Checking for existing username...');
       const checkUsernameSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
-      logger.info('Executing SQL:', checkUsernameSql);
+      console.log('SQL:', checkUsernameSql);
       const existingUsernameResult = await db.execute({
         sqlText: checkUsernameSql,
         binds: [username],
       });
+      console.log('Username check result:', existingUsernameResult);
 
-      if (existingUsernameResult && existingUsernameResult.length > 0) {
-        validationErrors.push({ msg: 'Username already exists', param: 'username', location: 'body' });
-      }
+      // Check for username and email uniqueness
+      let validationErrors = [];
 
-      // Check email
+      // Check username
       const checkEmailSql = 'SELECT * FROM trade.gwtrade.USERS WHERE EMAIL = ?';
       logger.info('Executing SQL:', checkEmailSql);
       const existingEmailResult = await db.execute({
@@ -168,9 +165,8 @@ router.post(
           ADDRESS,
           IS_EMAIL_VERIFIED,
           EMAIL_VERIFICATION_TOKEN,
-          EMAIL_VERIFICATION_EXPIRES,
-          YEARS_OF_EXPERIENCE
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          EMAIL_VERIFICATION_EXPIRES
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       logger.info('Executing SQL:', insertUserSql);
       await db.execute({
@@ -189,7 +185,6 @@ router.post(
           false, // IS_EMAIL_VERIFIED
           verificationToken,
           tokenExpires,
-          role === 'seller' ? years_of_experience : null,
         ],
       });
 
@@ -212,9 +207,12 @@ router.post(
       await transporter.sendMail(mailOptions);
       logger.info(`Verification email sent to ${email}`);
 
+      console.log('=== Registration Successful ===');
       res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
     } catch (error) {
-      logger.error('Registration error:', error);
+      console.error('=== Registration Error ===');
+      console.error('Error details:', error);
+      console.error('Stack trace:', error.stack);
       const errorDetails = [{ msg: error.message }];
       if (process.env.NODE_ENV === 'development') {
         errorDetails.push({ stack: error.stack });
