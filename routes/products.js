@@ -245,6 +245,38 @@ router.delete('/:productId', authMiddleware, authorize(['exporter']), async (req
   }
 });
 
+// GET /api/products/:productId - Get a single product
+router.get('/:productId', async (req, res) => {
+  const { productId } = req.params;
+  logger.info(`Fetching product details for ID: ${productId}`);
+   try {
+    const productResult = await db.execute({
+      sqlText: `
+        SELECT 
+          p.PRODUCT_ID,
+          p.NAME,
+          p.DESCRIPTION,
+          p.PRICE,
+          p.CATEGORY,
+          p.SELLER_ID,
+          u.FULL_NAME AS SELLER_NAME
+        FROM trade.gwtrade.PRODUCTS p
+        LEFT JOIN trade.gwtrade.USERS u ON p.SELLER_ID = u.USER_ID
+        WHERE p.PRODUCT_ID = ?
+      `,
+      binds: [productId],
+    });
+     if (!productResult || productResult.length === 0) {
+      logger.warn(`Product not found with ID: ${productId}`);
+      return res.status(404).json({ message: 'Product not found' });
+    }
+     res.json(productResult[0]);
+  } catch (error) {
+    logger.error(`Error fetching product ${productId}:`, error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+ });
+
 // Public Route: Get Sellers for a Specific Product
 router.get('/:productId/sellers', async (req, res) => { // Removed authMiddleware and authorize
   const { productId } = req.params;
