@@ -40,6 +40,7 @@ if (env !== 'production') {
 }
 const verifyCompanyRouter = require('./routes/verifyCompany');
 const activitiesRouter = require('./routes/activities');
+const testRouter = require('./routes/test');
 
 const app = express();
 
@@ -111,7 +112,7 @@ app.use('/api', verifyCompanyRouter);
 app.use('/api/activities', activitiesRouter);
 app.use('/api/buyers', buyersRouter);
 app.use('/api', matchmakingRoutes);
-
+app.use('/test', testRouter);
 // **9. Root Route**
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');

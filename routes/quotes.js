@@ -9,6 +9,25 @@ const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import the SendGrid function
 const { sendQuoteResponseEmail } = require('../utils/emailService'); // Import the email function
+const redis = require('../config/redis');
+
+const CACHE_EXPIRATION = 3600; // 1 hour
+
+// Helper function to clear quote caches
+const clearQuoteCache = async (buyerId, sellerId, quoteId) => {
+  try {
+    // Clear specific quote cache
+    if (quoteId) {
+      await redis.del(`quote_${quoteId}`);
+    }
+    // Clear user quote lists
+    if (buyerId) await redis.del(`quotes_buyer_${buyerId}`);
+    if (sellerId) await redis.del(`quotes_seller_${sellerId}`);
+    console.log('Quote cache cleared');
+  } catch (error) {
+    logger.error('Error clearing quote cache:', error);
+  }
+};
 
 // POST /api/quotes - Request a new quote
 router.post('/', authMiddleware, async (req, res) => {
@@ -100,6 +119,9 @@ router.post('/', authMiddleware, async (req, res) => {
       });
     }
 
+    // Clear buyer's and seller's quote cache after creation
+    await clearQuoteCache(buyerId, sellerId);
+    
     // Respond to buyer
     res.status(201).json({ message: 'Quote requested successfully.', quoteId });
   } catch (error) {
@@ -148,6 +170,9 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
 
     // Send notification to the buyer (you can implement this later)
 
+    // Clear caches after response
+    await clearQuoteCache(quote.BUYER_ID, sellerId, id);
+    
     res.status(200).json({ message: 'Quote response submitted successfully.' });
   } catch (error) {
     console.error('Error responding to quote:', error);
@@ -161,7 +186,21 @@ router.get('/:id', authMiddleware, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
     const role = req.user.role;
+    const cacheKey = `quote_${id}`;
 
+    // Try cache first
+    const cachedQuote = await redis.get(cacheKey);
+    if (cachedQuote) {
+      const quote = JSON.parse(cachedQuote);
+      // Verify user has permission to view this quote
+      if ((role === 'buyer' && quote.BUYER_ID === userId) || 
+          (role === 'seller' && quote.SELLER_ID === userId)) {
+        logger.info('Serving quote from cache');
+        return res.json(quote);
+      }
+    }
+
+    // If not in cache or no permission, query database
     let quote;
     if (role === 'seller') {
       quote = await db.execute({
@@ -185,20 +224,21 @@ router.get('/:id', authMiddleware, async (req, res) => {
         `,
         binds: [id, userId],
       });
-    } else {
-      logger.warn(`Access denied: User ID=${userId}, Role=${role} attempting to access Quote ID=${id}`);
-      return res.status(403).json({ message: 'Access denied.' });
     }
 
-    if (quote.length === 0) {
-      logger.warn(`Quote not found or unauthorized access: Quote ID=${id}, User ID=${userId}, Role=${role}`);
-      return res.status(404).json({ message: 'Quote not found or you do not have permission to view this quote.' });
+    if (!quote || quote.length === 0) {
+      logger.warn(`Quote not found or unauthorized: Quote ID=${id}, User ID=${userId}`);
+      return res.status(404).json({ message: 'Quote not found or unauthorized' });
     }
 
-    res.status(200).json(quote[0]);
+    // Cache the quote
+    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(quote[0]));
+    logger.info(`Cached quote ${id}`);
+
+    res.json(quote[0]);
   } catch (error) {
-    logger.error(`Error fetching quote ID=${id}: ${error.message}`, error);
-    res.status(500).json({ message: 'An error occurred while fetching the quote.', error: error.message });
+    logger.error(`Error fetching quote ID=${id}:`, error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -209,6 +249,14 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
     const role = req.user.role;
+    const cacheKey = `quotes_${role}_${userId}`;
+
+    // Try cache first
+    const cachedQuotes = await redis.get(cacheKey);
+    if (cachedQuotes) {
+      logger.info('Serving quotes from cache');
+      return res.json(JSON.parse(cachedQuotes));
+    }
 
     let quotes;
 
@@ -269,117 +317,14 @@ router.get('/', authMiddleware, async (req, res) => {
       return res.status(403).json({ message: 'Access denied.' });
     }
 
-    res.status(200).json(quotes);
+    // Cache the results
+    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(quotes));
+    logger.info(`Cached quotes for ${role} ${userId}`);
+
+    res.json(quotes);
   } catch (error) {
     logger.error('Error fetching quotes:', error);
-    res.status(500).json({ message: 'An error occurred while fetching quotes.', error: error.message });
-  }
-});
-
-// POST /api/quotes/:id/respond - Respond to a quote request
-router.post('/:id/respond', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { price, notes } = req.body;
-    const sellerId = req.user.id;
-
-    // Validate and parse 'price'
-    const parsedPrice = parseFloat(price);
-    if (isNaN(parsedPrice) || parsedPrice <= 0) {
-      logger.warn(`Invalid price received: ${price} for quote ID=${id} by seller ID=${sellerId}`);
-      return res.status(400).json({ message: 'Invalid price. Must be a positive number.' });
-    }
-
-    // Validate 'notes'
-    const sellerNotes = typeof notes === 'string' ? notes.trim() : '';
-
-    // Check if the quote exists and belongs to the seller
-    const quoteResult = await db.execute({
-      sqlText: `
-        SELECT q.*, u.EMAIL AS BUYER_EMAIL, u.FULL_NAME AS BUYER_NAME, p.NAME AS PRODUCT_NAME
-        FROM trade.gwtrade.QUOTES q
-        JOIN trade.gwtrade.USERS u ON q.BUYER_ID = u.USER_ID
-        JOIN trade.gwtrade.PRODUCTS p ON q.PRODUCT_ID = p.PRODUCT_ID
-        WHERE q.QUOTE_ID = ? AND q.SELLER_ID = ?
-      `,
-      binds: [id, sellerId],
-    });
-
-    if (quoteResult.length === 0) {
-      logger.warn(`Quote not found or unauthorized access: Quote ID=${id}, Seller ID=${sellerId}`);
-      return res.status(404).json({ message: 'Quote not found or you do not have permission to respond to this quote.' });
-    }
-
-    const quote = quoteResult[0];
-
-    // Check if the quote is already responded to
-    if (quote.STATUS === 'Responded') {
-      logger.warn(`Attempt to respond to an already responded quote: Quote ID=${id}`);
-      return res.status(400).json({ message: 'This quote has already been responded to.' });
-    }
-
-    // Check if the PRICE column exists
-    const checkPriceColumn = await db.execute({
-      sqlText: `
-        SELECT COUNT(*) AS COLUMN_EXISTS 
-        FROM information_schema.columns 
-        WHERE table_schema = 'GWTRADE' 
-        AND table_name = 'QUOTES' 
-        AND column_name = 'PRICE'
-      `,
-    });
-
-    const priceColumnExists = checkPriceColumn[0].COLUMN_EXISTS > 0;
-
-    // Update the quote with the response
-    let updateSql = `
-      UPDATE trade.gwtrade.QUOTES
-      SET STATUS = 'Responded', SELLER_NOTES = ?, RESPONDED_AT = CURRENT_TIMESTAMP()
-    `;
-    let binds = [sellerNotes];
-
-    if (priceColumnExists) {
-      updateSql += `, PRICE = ?`;
-      binds.push(parsedPrice);
-    } else {
-      logger.warn(`PRICE column does not exist in QUOTES table. Skipping price update for Quote ID=${id}`);
-    }
-
-    updateSql += ` WHERE QUOTE_ID = ?`;
-    binds.push(id);
-
-    await db.execute({
-      sqlText: updateSql,
-      binds: binds,
-    });
-
-    logger.info(`Quote responded: Quote ID=${id}, Seller ID=${sellerId}, Price=${parsedPrice}`);
-
-    // Log activity
-    const activityMessage = `Responded to quote request ${id} with price ${parsedPrice}.`;
-    await logActivity(sellerId, activityMessage, 'quote');
-    logger.info(`Activity logged for quote response: Quote ID=${id}, Seller ID=${sellerId}`);
-
-    // Send notification to the buyer
-    try {
-      await sendQuoteResponseEmail(
-        quote.BUYER_EMAIL,
-        quote.BUYER_NAME,
-        quote.PRODUCT_NAME,
-        parsedPrice,
-        sellerNotes,
-        id
-      );
-      logger.info(`Quote response email sent to buyer: Quote ID=${id}, Buyer Email=${quote.BUYER_EMAIL}`);
-    } catch (emailError) {
-      logger.error(`Failed to send quote response email to buyer: Quote ID=${id}, Error=${emailError.message}`);
-      // Optionally handle email sending failure
-    }
-
-    res.status(200).json({ message: 'Quote response submitted successfully.' });
-  } catch (error) {
-    logger.error(`Error responding to quote ID=${req.params.id}: ${error.message}`, error);
-    res.status(500).json({ message: 'An error occurred while responding to the quote.', error: error.message });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

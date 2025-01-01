@@ -5,14 +5,37 @@ const router = express.Router();
 const db = require('../db'); // Snowflake database module
 const authMiddleware = require('../middleware/auth'); // Authentication middleware
 const authorize = require('../middleware/authorize'); // Authorization middleware
+const redis = require('../config/redis');
 
-// Sales Overview Endpoint
+const CACHE_EXPIRATION = 1800; // 30 minutes for analytics data
+
+// Helper function to clear seller analytics cache
+const clearSellerAnalyticsCache = async (sellerId) => {
+  try {
+    await redis.del(`sales_overview_${sellerId}`);
+    await redis.del(`product_performance_${sellerId}`);
+    await redis.del(`time_analysis_${sellerId}`);
+    console.log('Analytics cache cleared for seller:', sellerId);
+  } catch (error) {
+    console.error('Error clearing analytics cache:', error);
+  }
+};
+
+// Sales Overview Endpoint with caching
 router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
+  const cacheKey = `sales_overview_${sellerId}`;
   console.log(`Processing sales-overview for Seller ID: ${sellerId}`);
 
   try {
-    // Total Revenue
+    // Try to get from cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('Serving sales overview from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+
+    // If not in cache, calculate analytics
     const totalRevenueResult = await db.execute({
       sqlText: `
         SELECT SUM(oi.PRICE * oi.QUANTITY) AS TOTAL_REVENUE
@@ -82,26 +105,39 @@ router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req,
       salesGrowthPercentage = 100;
     }
 
-    // Send the response
-    res.json({
+    const analyticsData = {
       totalRevenue,
       numberOfOrders,
       averageOrderValue,
       salesGrowthPercentage,
-    });
+    };
+
+    // Cache the results
+    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(analyticsData));
+    console.log('Analytics data cached for seller:', sellerId);
+
+    res.json(analyticsData);
   } catch (error) {
     console.error('Error fetching sales overview:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Product Performance Endpoint
+// Product Performance Endpoint with caching
 router.get('/product-performance', authMiddleware, authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
+  const cacheKey = `product_performance_${sellerId}`;
   console.log(`Processing product-performance for Seller ID: ${sellerId}`);
 
   try {
-    // Top Selling Products
+    // Try cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('Serving product performance from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+
+    // If not in cache, fetch data
     const topSellingProductsResult = await db.execute({
       sqlText: `
         SELECT p.PRODUCT_ID, p.NAME, SUM(oi.QUANTITY) AS TOTAL_QUANTITY_SOLD
@@ -143,25 +179,38 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
     console.log('Product Category Distribution Result:', productCategoryDistributionResult);
     const productCategoryDistribution = productCategoryDistributionResult;
 
-    // Send the response
-    res.json({
+    const performanceData = {
       topSellingProducts,
       lowStockProducts,
       productCategoryDistribution,
-    });
+    };
+
+    // Cache the results
+    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(performanceData));
+    console.log('Product performance data cached');
+
+    res.json(performanceData);
   } catch (error) {
     console.error('Error fetching product performance:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-// Time-Based Analysis Endpoint
+// Time-Based Analysis Endpoint with caching
 router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async (req, res) => {
   const sellerId = req.user.id;
+  const cacheKey = `time_analysis_${sellerId}`;
   console.log(`Processing time-based-analysis for Seller ID: ${sellerId}`);
 
   try {
-    // Daily Sales Trends
+    // Try cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('Serving time analysis from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+
+    // If not in cache, fetch data
     const dailySalesResult = await db.execute({
       sqlText: `
         SELECT
@@ -200,15 +249,29 @@ router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async 
     console.log('Peak Sales Hours Result:', peakSalesHoursResult);
     const peakSalesHours = peakSalesHoursResult;
 
-    // Send the response
-    res.json({
+    const timeAnalysisData = {
       dailySales,
       peakSalesHours,
-    });
+    };
+
+    // Cache the results for a shorter time since it's time-sensitive data
+    await redis.setex(cacheKey, 900, JSON.stringify(timeAnalysisData)); // 15 minutes cache
+    console.log('Time analysis data cached');
+
+    res.json(timeAnalysisData);
   } catch (error) {
     console.error('Error fetching time-based analysis:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
-module.exports = router;
+// Clear analytics cache when new order is placed (you'll need to call this from your orders route)
+const clearAnalyticsCache = async (sellerId) => {
+  try {
+    await clearSellerAnalyticsCache(sellerId);
+  } catch (error) {
+    console.error('Error clearing analytics cache:', error);
+  }
+};
+
+module.exports = { router, clearAnalyticsCache };

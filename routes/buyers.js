@@ -3,11 +3,24 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const authMiddleware = require('../middleware/auth');
+const redis = require('../config/redis');
 
+const CACHE_EXPIRATION = 3600; // 1 hour
+
+// Helper function to clear buyer cache
+const clearBuyerCache = async (userId) => {
+  try {
+    await redis.del(`buyer_profile_${userId}`);
+    console.log('Buyer cache cleared for:', userId);
+  } catch (error) {
+    console.error('Error clearing buyer cache:', error);
+  }
+};
 
 // GET: Retrieve the buyer's profile
 router.get('/profile', authMiddleware, async (req, res) => {
   const buyerId = req.user.id;
+  const cacheKey = `buyer_profile_${buyerId}`;
 
   // Ensure the user is a buyer
   if (req.user.role !== 'buyer') {
@@ -15,7 +28,14 @@ router.get('/profile', authMiddleware, async (req, res) => {
   }
 
   try {
-    // Fetch buyer's profile
+    // Try to get from cache first
+    const cachedProfile = await redis.get(cacheKey);
+    if (cachedProfile) {
+      console.log('Serving buyer profile from cache');
+      return res.json(JSON.parse(cachedProfile));
+    }
+
+    // Fetch buyer's profile from database
     const buyerResult = await db.execute({
       sqlText: `SELECT * FROM trade.gwtrade.BUYERS WHERE USER_ID = ?`,
       binds: [buyerId],
@@ -50,6 +70,10 @@ router.get('/profile', authMiddleware, async (req, res) => {
       location: buyerProfile.LOCATION || '',
     };
 
+    // Cache the profile data
+    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(profileData));
+    console.log('Buyer profile cached for:', buyerId);
+
     res.json({ profile: profileData });
   } catch (error) {
     console.error('Error fetching buyer profile:', error);
@@ -57,7 +81,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
   }
 });
 
-// PUT: Update buyer's product interests
+// PUT: Update buyer's profile
 router.put('/profile', authMiddleware, async (req, res) => {
   const buyerId = req.user.id;
 
@@ -73,7 +97,7 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 
   try {
-    // Update the buyer's product interests and location (if provided)
+    // Update the buyer's profile
     const updateFields = [];
     const binds = [];
     let bindIndex = 1;
@@ -98,10 +122,13 @@ router.put('/profile', authMiddleware, async (req, res) => {
 
     binds.push(buyerId);
 
-    const result = await db.execute({
+    await db.execute({
       sqlText,
       binds,
     });
+
+    // Clear the buyer's cache after update
+    await clearBuyerCache(buyerId);
 
     res.json({ message: 'Buyer profile updated successfully.' });
   } catch (error) {

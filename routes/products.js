@@ -6,6 +6,8 @@ const db = require('../db');
 const { body, validationResult } = require('express-validator');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid'); // Import the uuid module
+const redis = require('../config/redis');
+const CACHE_EXPIRATION = 3600; // 1 hour in seconds
 
 // Authentication and Authorization middleware
 const authMiddleware = require('../middleware/auth'); // Authentication middleware
@@ -17,19 +19,25 @@ const cache = new NodeCache({ stdTTL: 300 }); // Cache for 5 minutes
 
 // GET /api/products - Public 
 router.get('/', async (req, res) => {
-  console.log('Received GET request to /api/products');
-
-  const getCurrentDbSchemaSql = 'SELECT CURRENT_DATABASE(), CURRENT_SCHEMA()';
-  console.log('Executing SQL query:', getCurrentDbSchemaSql);
+  const startTime = Date.now();
+  console.log('=== START: GET /api/products ===');
+  console.log('Time:', new Date().toISOString());
 
   try {
-    // Fetch current database and schema
-    const dbSchemaRows = await db.execute({ sqlText: getCurrentDbSchemaSql });
-    const currentDb = dbSchemaRows[0].CURRENT_DATABASE;
-    const currentSchema = dbSchemaRows[0].CURRENT_SCHEMA;
-    console.log(`Current Database: ${currentDb}, Current Schema: ${currentSchema}`);
+    // Try to get from cache first
+    let cachedProducts;
+    try {
+      cachedProducts = await redis.get('all_products');
+      if (cachedProducts) {
+        console.log('Cache hit! Serving from Redis');
+        return res.json(JSON.parse(cachedProducts));
+      }
+      console.log('Cache miss, querying database');
+    } catch (cacheError) {
+      console.log('Cache error, falling back to database:', cacheError.message);
+    }
 
-    // Modified SQL to include SELLER_NAME by joining with USERS table
+    // Database query
     const sql = `
       SELECT 
         p.PRODUCT_ID,
@@ -44,24 +52,44 @@ router.get('/', async (req, res) => {
       FROM trade.gwtrade.PRODUCTS p
       LEFT JOIN trade.gwtrade.USERS u ON p.SELLER_ID = u.USER_ID
       WHERE u.ROLE = 'seller'
-    `; // Fully qualified table name
-    console.log('Executing SQL query:', sql);
+    `;
 
+    console.log('Executing database query...');
     const rows = await db.execute({ sqlText: sql });
     
-    console.log(`Fetched ${rows ? rows.length : 0} products from the database`);
-    
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ message: 'No products found' });
+    // Store in Redis cache
+    try {
+      await redis.setex('all_products', 3600, JSON.stringify(rows)); // Cache for 1 hour
+      console.log('Successfully cached products');
+    } catch (cacheError) {
+      console.error('Failed to cache products:', cacheError.message);
     }
     
-    res.json(rows);
+    const duration = Date.now() - startTime;
+    console.log(`Request completed in ${duration}ms`);
+    console.log(`Returning ${rows?.length || 0} products`);
+    console.log('=== END: GET /api/products ===');
+    
+    res.json(rows || []);
+
   } catch (error) {
     console.error('Error in GET /api/products:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: error.message 
+    });
   }
 });
 
+// Clear cache when products are modified
+const clearProductCache = async () => {
+  try {
+    await redis.del('all_products');
+    console.log('Product cache cleared');
+  } catch (error) {
+    console.error('Error clearing product cache:', error);
+  }
+};
 
 // GET: Retrieve products for the authenticated seller
 router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) => {
@@ -168,6 +196,9 @@ router.post(
       const logActivity = require('../utils/activityLogger');
       await logActivity(SELLER_ID, `Posted new product "${NAME}"`, 'other');
 
+      // Clear cache after successful creation
+      await clearProductCache();
+      
       res.status(201).json({ message: 'Product created successfully', productId: PRODUCT_ID });
     } catch (error) {
       console.error('Error creating product:', error);
@@ -209,6 +240,7 @@ router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res
       binds: binds,
     });
 
+    await clearProductCache();
     res.json({ message: 'Product updated successfully' });
   } catch (error) {
     console.error('Error updating product:', error);
@@ -238,6 +270,7 @@ router.delete('/:productId', authMiddleware, authorize(['exporter']), async (req
       binds: [productId],
     });
 
+    await clearProductCache();
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     console.error('Error deleting product:', error);
