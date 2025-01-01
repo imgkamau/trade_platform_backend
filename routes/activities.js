@@ -37,7 +37,7 @@ router.get('/', authMiddleware, async (req, res) => {
       return res.json(JSON.parse(cachedActivities));
     }
 
-    // If not in cache, fetch from database
+    // If not in cache, fetch from database with 48-hour filter
     const rows = await db.execute({
       sqlText: `
         SELECT 
@@ -47,6 +47,7 @@ router.get('/', authMiddleware, async (req, res) => {
           TYPE AS type
         FROM trade.gwtrade.Activities
         WHERE USER_ID = ?
+          AND TIMESTAMP >= DATEADD('hour', -48, CURRENT_TIMESTAMP())
         ORDER BY TIMESTAMP DESC
         LIMIT 50
       `,
