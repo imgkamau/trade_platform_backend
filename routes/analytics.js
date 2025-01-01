@@ -274,4 +274,6 @@ const clearAnalyticsCache = async (sellerId) => {
   }
 };
 
-module.exports = { router, clearAnalyticsCache };
+module.exports = router;
+// If you need clearAnalyticsCache elsewhere, attach it to the router
+router.clearAnalyticsCache = clearAnalyticsCache;
