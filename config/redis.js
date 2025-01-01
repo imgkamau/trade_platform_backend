@@ -3,23 +3,17 @@ const Redis = require('ioredis');
 let redis;
 
 try {
-  // Parse Redis URL to handle authentication
-  const redisURL = new URL(process.env.REDIS_URL);
-  
   redis = new Redis({
-    host: redisURL.hostname,
-    port: redisURL.port || 6379,
-    password: redisURL.password, // This handles the authentication
-    username: redisURL.username,
-    tls: {
-      rejectUnauthorized: false // Required for some Redis providers
-    },
+    host: process.env.REDIS_HOST,
+    port: process.env.REDIS_PORT,
+    password: process.env.REDIS_PASSWORD,
     retryStrategy(times) {
       const delay = Math.min(times * 50, 2000);
       return delay;
     },
     maxRetriesPerRequest: null,
-    enableReadyCheck: false
+    enableReadyCheck: false,
+    tls: true
   });
 
   redis.on('error', (error) => {
