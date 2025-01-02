@@ -13,7 +13,7 @@ try {
     },
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
-    tls: true
+    tls: false
   });
 
   redis.on('error', (error) => {
