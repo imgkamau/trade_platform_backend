@@ -32,6 +32,8 @@ const scheduler = require('./utils/scheduler'); // Import the scheduler
 const sellerProductsRouter = require('./routes/sellerProducts');
 const buyersRouter = require('./routes/buyers');
 const matchmakingRoutes = require('./routes/matchmaking');
+const euRequirementsRouter = require('./routes/eu-requirements');
+
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
 let connectToSnowflake;
@@ -113,6 +115,7 @@ app.use('/api/activities', activitiesRouter);
 app.use('/api/buyers', buyersRouter);
 app.use('/api', matchmakingRoutes);
 app.use('/test', testRouter);
+app.use('/api', euRequirementsRouter);
 // **9. Root Route**
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');
