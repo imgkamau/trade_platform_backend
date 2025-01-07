@@ -157,17 +157,17 @@ router.post('/profile', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Buyer profile already exists.' });
     }
 
-    // Create initial profile
+    // Create initial profile using SELECT syntax that we know works
     await db.execute({
       sqlText: `
         INSERT INTO trade.gwtrade.BUYERS (
           USER_ID,
           PRODUCT_INTERESTS,
-          LOCATION,
-          CREATED_AT
-        ) VALUES (?, PARSE_JSON('[]'), '', CURRENT_TIMESTAMP())
+          LOCATION
+        ) 
+        SELECT ?, ARRAY_CONSTRUCT(''), ?
       `,
-      binds: [buyerId],
+      binds: [buyerId, ''],
     });
 
     res.status(201).json({ 
