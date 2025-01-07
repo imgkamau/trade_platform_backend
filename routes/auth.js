@@ -13,6 +13,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const nodemailer = require('nodemailer'); // Nodemailer module
 const cors = require('cors'); // CORS middleware
+const sendEmail = require('../config/nodemailer');
 
 // Apply helmet middleware for security
 router.use(helmet());
@@ -23,15 +24,6 @@ router.use(cors({
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-
-// Nodemailer transporter configuration
-const transporter = nodemailer.createTransport({
-  service: 'gmail', // Use your email service provider
-  auth: {
-    user: process.env.EMAIL_USER, // Your email address
-    pass: process.env.EMAIL_PASS, // Your email password or app-specific password
-  },
-});
 
 // Helper function for consistent error responses
 const sendErrorResponse = (res, status, message, errors = null) => {
@@ -192,23 +184,25 @@ router.post(
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       const verificationLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
 
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: 'Verify Your Email for Kenya-EU Trade Platform',
-        html: `
-          <h1>Welcome to Kenya-EU Trade Platform</h1>
-          <p>Please click the link below to verify your email address:</p>
-          <a href="${verificationLink}">${verificationLink}</a>
-          <p>This link will expire in 24 hours.</p>
-        `,
-      };
-
-      await transporter.sendMail(mailOptions);
-      logger.info(`Verification email sent to ${email}`);
-
-      console.log('=== Registration Successful ===');
-      res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
+      try {
+        await sendEmail({
+          to: email,
+          subject: 'Verify Your Email for Kenya-EU Trade Platform',
+          html: `
+            <h1>Welcome to Kenya-EU Trade Platform</h1>
+            <p>Please click the link below to verify your email address:</p>
+            <a href="${verificationLink}">${verificationLink}</a>
+            <p>This link will expire in 24 hours.</p>
+          `
+        });
+        
+        console.log('=== Registration Successful ===');
+        res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
+      } catch (error) {
+        console.error('=== Email Sending Error ===');
+        console.error('Error details:', error);
+        throw error;
+      }
     } catch (error) {
       console.error('=== Registration Error ===');
       console.error('Error details:', error);

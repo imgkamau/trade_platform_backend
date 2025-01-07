@@ -1,29 +1,10 @@
 // utils/emailService.js
 
-require('dotenv').config(); // Load environment variables
-const nodemailer = require('nodemailer');
+require('dotenv').config();
 const sgMail = require('@sendgrid/mail');
-const logger = require('./logger'); // Ensure you have a logger utility
+const logger = require('./logger');
 
-// Nodemailer Configuration for Verification Emails
-const nodemailerTransporter = nodemailer.createTransport({
-  service: 'gmail', // Use 'gmail' if you're using Gmail or your email service provider
-  auth: {
-    user: process.env.EMAIL_USER, // Your email address (e.g., xxxx@example.com)
-    pass: process.env.EMAIL_PASS, // Your email password or app-specific password
-  },
-});
-
-// Verify Nodemailer Transporter Configuration
-nodemailerTransporter.verify((error, success) => {
-  if (error) {
-    logger.error('Nodemailer transporter configuration error:', error);
-  } else {
-    logger.info('Nodemailer transporter is configured successfully.');
-  }
-});
-
-// SendGrid Configuration for Quote Emails
+// SendGrid Configuration
 const sendGridApiKey = process.env.SENDGRID_API_KEY;
 if (!sendGridApiKey) {
   throw new Error('SENDGRID_API_KEY is not set in environment variables.');
@@ -41,9 +22,8 @@ if (!frontendUrl) {
   throw new Error('FRONTEND_URL is not set in environment variables.');
 }
 
-// Function: Send Verification Email using Nodemailer
+// Function: Send Verification Email using SendGrid
 const sendVerificationEmail = async (email, token) => {
-  // Parameter validation
   if (!email || typeof email !== 'string') {
     throw new Error('Invalid or missing email address.');
   }
@@ -53,24 +33,24 @@ const sendVerificationEmail = async (email, token) => {
 
   const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
 
-  const mailOptions = {
-    from: `"Your App Name" <${process.env.EMAIL_USER}>`, // Sender address
-    to: email, // Recipient address
+  const msg = {
+    to: email,
+    from: `"Kenya-EU Trade Platform" <${emailFrom}>`,
     subject: 'Email Verification',
     html: `
       <p>Hello,</p>
       <p>Please verify your email by clicking the link below:</p>
       <a href="${verificationLink}">Verify Email</a>
       <p>If you did not sign up for this account, you can ignore this email.</p>
-      <p>Best regards,<br/>Your App Name Team</p>
+      <p>Best regards,<br/>Kenya-EU Trade Platform Team</p>
     `,
   };
 
   try {
-    await nodemailerTransporter.sendMail(mailOptions);
+    await sgMail.send(msg);
     logger.info(`Verification email sent to ${email}`);
   } catch (error) {
-    logger.error('Error sending verification email:', error);
+    logger.error('Error sending verification email:', error.response?.body || error);
     throw new Error('Email could not be sent');
   }
 };
