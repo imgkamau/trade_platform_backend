@@ -80,138 +80,202 @@ router.post(
     body('address').notEmpty().withMessage('Address is required').trim(),
   ],
   async (req, res) => {
-    console.log('=== Registration Request Received ===');
-    console.log('Request Body:', {
-      ...req.body,
-      password: '[REDACTED]' // Don't log passwords
-    });
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      console.log('Validation Errors:', errors.array());
-      return sendErrorResponse(res, 400, 'Validation failed', errors.array());
-    }
-
-    const {
-      username,
-      password,
-      email,
-      full_name,
-      role,
-      company_name,
-      company_description,
-      phone_number,
-      address,
-    } = req.body;
-
     try {
-      console.log('Checking for existing username...');
-      const checkUsernameSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
-      console.log('SQL:', checkUsernameSql);
-      const existingUsernameResult = await db.execute({
-        sqlText: checkUsernameSql,
-        binds: [username],
+      // Test database access explicitly
+      console.log('Testing database access...');
+      const testQuery = await db.execute({
+        sqlText: 'SELECT CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA()',
       });
-      console.log('Username check result:', existingUsernameResult);
+      console.log('Database access test:', testQuery);
 
-      // Check for username and email uniqueness
-      let validationErrors = [];
-
-      // Check username
-      const checkEmailSql = 'SELECT * FROM trade.gwtrade.USERS WHERE EMAIL = ?';
-      logger.info('Executing SQL:', checkEmailSql);
-      const existingEmailResult = await db.execute({
-        sqlText: checkEmailSql,
-        binds: [email],
+      // Test table access
+      console.log('Testing table access...');
+      const tableTest = await db.execute({
+        sqlText: 'SELECT COUNT(*) FROM trade.gwtrade.USERS',
       });
+      console.log('Table access test:', tableTest);
 
-      if (existingEmailResult && existingEmailResult.length > 0) {
-        validationErrors.push({ msg: 'Email already exists', param: 'email', location: 'body' });
+      // 1. Debug Point: Initial Connection Test
+      try {
+        console.log('Testing Snowflake connection...');
+        await db.execute({
+          sqlText: 'SELECT CURRENT_TIMESTAMP()',
+        });
+        console.log('Snowflake connection successful');
+      } catch (error) {
+        console.error('Snowflake connection error:', {
+          message: error.message,
+          code: error.code,
+          state: error.state
+        });
+        return sendErrorResponse(res, 500, 'Database connection error');
       }
 
-      if (validationErrors.length > 0) {
-        return sendErrorResponse(res, 400, 'Validation failed', validationErrors);
-      }
-
-      // Hash the password
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-      const USER_ID = uuidv4();
-
-      // Generate email verification token
-      const verificationToken = uuidv4();
-      const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours from now
-
-      // Insert the new user into Snowflake
-      const insertUserSql = `
-        INSERT INTO trade.gwtrade.USERS (
-          USER_ID,
-          USERNAME,
-          PASSWORD_HASH,
-          EMAIL,
-          FULL_NAME,
-          ROLE,
-          COMPANY_NAME,
-          COMPANY_DESCRIPTION,
-          PHONE_NUMBER,
-          ADDRESS,
-          IS_EMAIL_VERIFIED,
-          EMAIL_VERIFICATION_TOKEN,
-          EMAIL_VERIFICATION_EXPIRES
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      logger.info('Executing SQL:', insertUserSql);
-      await db.execute({
-        sqlText: insertUserSql,
-        binds: [
-          USER_ID,
-          username,
-          hashedPassword,
-          email,
-          full_name,
-          role,
-          company_name,
-          company_description,
-          phone_number,
-          address,
-          false, // IS_EMAIL_VERIFIED
-          verificationToken,
-          tokenExpires,
-        ],
+      // 2. Debug Point: Environment Variables
+      console.log('Checking environment variables:', {
+        hasAccount: !!process.env.SNOWFLAKE_ACCOUNT,
+        hasUser: !!process.env.SNOWFLAKE_USER,
+        hasPassword: !!process.env.SNOWFLAKE_PASSWORD,
+        hasDatabase: !!process.env.SNOWFLAKE_DATABASE,
+        hasSchema: !!process.env.SNOWFLAKE_SCHEMA,
+        hasWarehouse: !!process.env.SNOWFLAKE_WAREHOUSE,
       });
 
-      // Send verification email
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const verificationLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
+      // 3. Debug Point: Request Validation
+      console.log('Request body:', {
+        ...req.body,
+        password: '[REDACTED]'
+      });
+
+      console.log('=== Registration Request Received ===');
+      console.log('Request Body:', {
+        ...req.body,
+        password: '[REDACTED]' // Don't log passwords
+      });
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        console.log('Validation Errors:', errors.array());
+        return sendErrorResponse(res, 400, 'Validation failed', errors.array());
+      }
+
+      const {
+        username,
+        password,
+        email,
+        full_name,
+        role,
+        company_name,
+        company_description,
+        phone_number,
+        address,
+      } = req.body;
 
       try {
-        await sendEmail({
-          to: email,
-          subject: 'Verify Your Email for Kenya-EU Trade Platform',
-          html: `
-            <h1>Welcome to Kenya-EU Trade Platform</h1>
-            <p>Please click the link below to verify your email address:</p>
-            <a href="${verificationLink}">${verificationLink}</a>
-            <p>This link will expire in 24 hours.</p>
-          `
+        console.log('Checking for existing username...');
+        const checkUsernameSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
+        console.log('SQL:', checkUsernameSql);
+        const existingUsernameResult = await db.execute({
+          sqlText: checkUsernameSql,
+          binds: [username],
         });
-        
-        console.log('=== Registration Successful ===');
-        res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
+        console.log('Username check result:', existingUsernameResult);
+
+        // Check for username and email uniqueness
+        let validationErrors = [];
+
+        // Check username
+        const checkEmailSql = 'SELECT * FROM trade.gwtrade.USERS WHERE EMAIL = ?';
+        logger.info('Executing SQL:', checkEmailSql);
+        const existingEmailResult = await db.execute({
+          sqlText: checkEmailSql,
+          binds: [email],
+        });
+
+        if (existingEmailResult && existingEmailResult.length > 0) {
+          validationErrors.push({ msg: 'Email already exists', param: 'email', location: 'body' });
+        }
+
+        if (validationErrors.length > 0) {
+          return sendErrorResponse(res, 400, 'Validation failed', validationErrors);
+        }
+
+        // Hash the password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        const USER_ID = uuidv4();
+
+        // Generate email verification token
+        const verificationToken = uuidv4();
+        const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours from now
+
+        // Insert the new user into Snowflake
+        const insertUserSql = `
+          INSERT INTO trade.gwtrade.USERS (
+            USER_ID,
+            USERNAME,
+            PASSWORD_HASH,
+            EMAIL,
+            FULL_NAME,
+            ROLE,
+            COMPANY_NAME,
+            COMPANY_DESCRIPTION,
+            PHONE_NUMBER,
+            ADDRESS,
+            IS_EMAIL_VERIFIED,
+            EMAIL_VERIFICATION_TOKEN,
+            EMAIL_VERIFICATION_EXPIRES
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        logger.info('Executing SQL:', insertUserSql);
+        await db.execute({
+          sqlText: insertUserSql,
+          binds: [
+            USER_ID,
+            username,
+            hashedPassword,
+            email,
+            full_name,
+            role,
+            company_name,
+            company_description,
+            phone_number,
+            address,
+            false, // IS_EMAIL_VERIFIED
+            verificationToken,
+            tokenExpires,
+          ],
+        });
+
+        // Send verification email
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const verificationLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
+
+        try {
+          await sendEmail({
+            to: email,
+            subject: 'Verify Your Email for Kenya-EU Trade Platform',
+            html: `
+              <h1>Welcome to Kenya-EU Trade Platform</h1>
+              <p>Please click the link below to verify your email address:</p>
+              <a href="${verificationLink}">${verificationLink}</a>
+              <p>This link will expire in 24 hours.</p>
+            `
+          });
+          
+          console.log('=== Registration Successful ===');
+          res.status(201).json({ message: 'User registered successfully. Please verify your email.' });
+        } catch (error) {
+          console.error('=== Email Sending Error ===');
+          console.error('Error details:', error);
+          throw error;
+        }
       } catch (error) {
-        console.error('=== Email Sending Error ===');
-        console.error('Error details:', error);
-        throw error;
+        // 6. Enhanced Error Logging
+        console.error('Registration error:', {
+          message: error.message,
+          code: error.code,
+          state: error.sqlState,
+          stack: error.stack,
+          query: error.query,
+          parameters: error.parameters
+        });
+        return sendErrorResponse(res, 500, 'Registration failed: ' + error.message);
       }
     } catch (error) {
-      console.error('=== Registration Error ===');
-      console.error('Error details:', error);
-      console.error('Stack trace:', error.stack);
-      const errorDetails = [{ msg: error.message }];
-      if (process.env.NODE_ENV === 'development') {
-        errorDetails.push({ stack: error.stack });
-      }
-      sendErrorResponse(res, 500, 'Server error', errorDetails);
+      console.error('Registration error details:', {
+        message: error.message,
+        code: error.code,
+        state: error.sqlState,
+        query: error?.sqlText,
+        binds: error?.binds,
+        stack: error.stack
+      });
+      return res.status(500).json({
+        error: 'Registration failed',
+        details: error.message,
+        code: error.code
+      });
     }
   }
 );
