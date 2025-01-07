@@ -137,4 +137,52 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// POST: Create initial buyer profile
+router.post('/profile', authMiddleware, async (req, res) => {
+  const buyerId = req.user.id;
+
+  // Ensure the user is a buyer
+  if (req.user.role !== 'buyer') {
+    return res.status(403).json({ message: 'Access denied. Only buyers can create profiles.' });
+  }
+
+  try {
+    // Check if profile already exists
+    const existingProfile = await db.execute({
+      sqlText: `SELECT USER_ID FROM trade.gwtrade.BUYERS WHERE USER_ID = ?`,
+      binds: [buyerId],
+    });
+
+    if (existingProfile.rows && existingProfile.rows.length > 0) {
+      return res.status(400).json({ message: 'Buyer profile already exists.' });
+    }
+
+    // Create initial profile
+    await db.execute({
+      sqlText: `
+        INSERT INTO trade.gwtrade.BUYERS (
+          USER_ID,
+          PRODUCT_INTERESTS,
+          LOCATION,
+          CREATED_AT
+        ) VALUES (?, PARSE_JSON('[]'), '', CURRENT_TIMESTAMP())
+      `,
+      binds: [buyerId],
+    });
+
+    res.status(201).json({ 
+      message: 'Buyer profile created successfully.',
+      profile: {
+        user_id: buyerId,
+        productInterests: [],
+        location: ''
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating buyer profile:', error);
+    res.status(500).json({ message: 'Internal server error', error: error.message });
+  }
+});
+
 module.exports = router;
