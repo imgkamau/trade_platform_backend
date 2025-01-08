@@ -444,88 +444,59 @@ router.post(
  */
 router.post(
   '/forgot-password',
-  [
-    body('email')
-      .isEmail()
-      .withMessage('Please provide a valid email address')
-      .normalizeEmail(),
-  ],
+  [body('email').isEmail().withMessage('Please provide a valid email address').normalizeEmail()],
   async (req, res) => {
-    // Validate input
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Forgot password validation failed', { errors: errors.array() });
       return sendErrorResponse(res, 400, 'Validation failed', errors.array());
     }
 
     const { email } = req.body;
 
     try {
-      // Check if user exists
       const checkUserSql = 'SELECT USER_ID, EMAIL FROM trade.gwtrade.USERS WHERE EMAIL = ?';
-      logger.info('Executing SQL:', checkUserSql);
       const userResult = await db.execute({
         sqlText: checkUserSql,
         binds: [email],
       });
 
+      // Always return success for security (even if email doesn't exist)
       if (!userResult || userResult.length === 0) {
-        // For security, don't reveal that email doesn't exist
-        logger.info(`Password reset requested for non-existing email: ${email}`);
         return res.status(200).json({ message: 'Password reset email sent' });
       }
 
       const user = userResult[0];
-      const userId = user.USER_ID;
-
-      // Generate a reset token
       const resetToken = crypto.randomBytes(32).toString('hex');
-      // Hash the token before storing
       const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
-      const resetTokenExpiry = new Date(Date.now() + 24 * 3600000).toISOString(); // 24 hours from now in UTC
+      const resetTokenExpiry = new Date(Date.now() + 24 * 3600000).toISOString();
 
-      // Update user record with reset token and expiry
-      const updateUserSql = `
-        UPDATE trade.gwtrade.USERS
-        SET RESET_PASSWORD_TOKEN = ?, RESET_PASSWORD_EXPIRES = ?
-        WHERE USER_ID = ?
-      `;
-      logger.info('Executing SQL:', updateUserSql);
       await db.execute({
-        sqlText: updateUserSql,
-        binds: [resetTokenHash, resetTokenExpiry, userId],
+        sqlText: `
+          UPDATE trade.gwtrade.USERS
+          SET RESET_PASSWORD_TOKEN = ?, RESET_PASSWORD_EXPIRES = ?
+          WHERE USER_ID = ?
+        `,
+        binds: [resetTokenHash, resetTokenExpiry, user.USER_ID],
       });
 
-      // Create reset URL
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}&id=${userId}`;
-
-      // Email content
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
+      const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}&id=${user.USER_ID}`;
+      
+      await sendEmail({
         to: user.EMAIL,
         subject: 'Password Reset Request',
         html: `
+          <h1>Password Reset Request</h1>
           <p>You have requested to reset your password.</p>
           <p>Please click the link below to reset your password:</p>
           <a href="${resetUrl}">${resetUrl}</a>
+          <p>This link will expire in 24 hours.</p>
           <p>If you did not request this, please ignore this email.</p>
-        `,
-      };
-
-      // Send email
-      await transporter.sendMail(mailOptions);
-
-      logger.info(`Password reset email sent to ${user.EMAIL}`);
+        `
+      });
 
       res.status(200).json({ message: 'Password reset email sent' });
     } catch (error) {
-      logger.error('Forgot password error:', error);
-      const errorDetails = [{ msg: error.message }];
-      if (process.env.NODE_ENV === 'development') {
-        errorDetails.push({ stack: error.stack });
-      }
-      sendErrorResponse(res, 500, 'Server error', errorDetails);
+      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
     }
   }
 );
@@ -539,110 +510,68 @@ router.post(
   '/reset-password',
   [
     body('token')
-      .notEmpty()
-      .withMessage('Token is required')
-      .isLength({ min: 64, max: 64 })
-      .withMessage('Invalid token format'),
+      .notEmpty().withMessage('Token is required')
+      .isLength({ min: 64, max: 64 }).withMessage('Invalid token format'),
     body('id')
-      .notEmpty()
-      .withMessage('User ID is required')
-      .isUUID()
-      .withMessage('Invalid User ID format'),
+      .notEmpty().withMessage('User ID is required')
+      .isUUID().withMessage('Invalid User ID format'),
     body('password')
-      .isLength({ min: 8 })
-      .withMessage('Password must be at least 8 characters long')
-      .matches(/\d/)
-      .withMessage('Password must contain at least one number')
-      .matches(/[A-Z]/)
-      .withMessage('Password must contain at least one uppercase letter')
-      .matches(/[!@#$%^&*(),.?":{}|<>]/)
-      .withMessage('Password must contain at least one special character'),
+      .isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+      .matches(/\d/).withMessage('Password must contain at least one number')
+      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+      .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Password must contain at least one special character'),
   ],
   async (req, res) => {
-    // Validate input
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Reset password validation failed', { errors: errors.array() });
       return sendErrorResponse(res, 400, 'Validation failed', errors.array());
     }
 
     const { token, id, password } = req.body;
 
     try {
-      // Hash the received token to compare with stored hash
       const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-      logger.info('Password Reset Attempt:', {
-        userId: id,
-        resetTokenHash: resetTokenHash,
-      });
-
-      // Query to find the user with the matching reset token and unexpired
-      const checkTokenSql = `
-        SELECT USER_ID, EMAIL, RESET_PASSWORD_EXPIRES 
-        FROM trade.gwtrade.USERS
-        WHERE USER_ID = ? AND RESET_PASSWORD_TOKEN = ? AND RESET_PASSWORD_EXPIRES > CURRENT_TIMESTAMP()
-      `;
-      logger.info('Executing SQL Query for Token Validation:', {
-        sql: checkTokenSql,
-        binds: [id, resetTokenHash],
-      });
       const userResult = await db.execute({
-        sqlText: checkTokenSql,
+        sqlText: `
+          SELECT USER_ID, EMAIL, RESET_PASSWORD_EXPIRES 
+          FROM trade.gwtrade.USERS
+          WHERE USER_ID = ? AND RESET_PASSWORD_TOKEN = ? AND RESET_PASSWORD_EXPIRES > CURRENT_TIMESTAMP()
+        `,
         binds: [id, resetTokenHash],
       });
 
       if (!userResult || userResult.length === 0) {
-        logger.info(`Invalid or expired password reset token for user ID: ${id}`);
         return sendErrorResponse(res, 400, 'Invalid or expired password reset token');
       }
 
       const user = userResult[0];
-      const userId = user.USER_ID;
-
-      // Hash the new password
       const salt = await bcrypt.genSalt(12);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      // Update user's password and clear reset token fields
-      const updatePasswordSql = `
-        UPDATE trade.gwtrade.USERS
-        SET PASSWORD_HASH = ?, RESET_PASSWORD_TOKEN = NULL, RESET_PASSWORD_EXPIRES = NULL
-        WHERE USER_ID = ?
-      `;
-      logger.info('Executing SQL Query to Update Password:', {
-        sql: updatePasswordSql,
-        binds: [hashedPassword, userId],
-      });
       await db.execute({
-        sqlText: updatePasswordSql,
-        binds: [hashedPassword, userId],
+        sqlText: `
+          UPDATE trade.gwtrade.USERS
+          SET PASSWORD_HASH = ?, RESET_PASSWORD_TOKEN = NULL, RESET_PASSWORD_EXPIRES = NULL
+          WHERE USER_ID = ?
+        `,
+        binds: [hashedPassword, user.USER_ID],
       });
 
-      // Send a confirmation email to the user
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
+      await sendEmail({
         to: user.EMAIL,
-        subject: 'Your password has been successfully reset',
+        subject: 'Password Reset Successful',
         html: `
-          <p>Hello,</p>
-          <p>This is a confirmation that your password has been successfully reset.</p>
+          <h1>Password Reset Successful</h1>
+          <p>Your password has been successfully reset.</p>
           <p>If you did not perform this action, please contact our support immediately.</p>
           <p>Best regards,<br/>Support Team</p>
-        `,
-      };
-
-      await transporter.sendMail(mailOptions);
-      logger.info(`Password reset successfully for user ${user.EMAIL}`);
+        `
+      });
 
       res.status(200).json({ message: 'Password has been reset successfully' });
     } catch (error) {
-      logger.error('Reset password error:', error);
-      const errorDetails = [{ msg: error.message }];
-      if (process.env.NODE_ENV === 'development') {
-        errorDetails.push({ stack: error.stack });
-      }
-      sendErrorResponse(res, 500, 'Server error', errorDetails);
+      sendErrorResponse(res, 500, 'Server error', [{ msg: error.message }]);
     }
   }
 );

@@ -46,23 +46,22 @@ function normalizeBuyerInterests(interests) {
 async function fetchSellersData(db) {
   const query = `
     SELECT 
-      u.USER_ID as SELLER_ID,
-      u.COMPANY_NAME,
-      u.YEARS_OF_EXPERIENCE,
-      u.AVERAGE_RATING,
-      p.NAME as PRODUCT_NAME,
+      s.USER_ID as SELLER_ID,
+      s.PRODUCTS_OFFERED,
+      s.CERTIFICATIONS,
+      s.TARGET_MARKETS,
+      s.LOCATION,
       COUNT(o.ORDER_ID) as TOTAL_ORDERS,
-      AVG(DATEDIFF('HOUR', o.CREATED_AT, o.UPDATED_AT)) as AVG_RESPONSE_TIME,
       COUNT(CASE WHEN o.STATUS = 'Completed' THEN 1 END) as SUCCESSFUL_ORDERS
-    FROM trade.gwtrade.USERS u
-    JOIN trade.gwtrade.PRODUCTS p ON p.SELLER_ID = u.USER_ID
-    LEFT JOIN trade.gwtrade.ORDERS o ON o.SELLER_ID = u.USER_ID
-    WHERE u.ROLE = 'seller' AND u.IS_ACTIVE = true
-    GROUP BY u.USER_ID, u.COMPANY_NAME, u.YEARS_OF_EXPERIENCE, u.AVERAGE_RATING, p.NAME
+    FROM trade.gwtrade.SELLERS s
+    LEFT JOIN trade.gwtrade.ORDERS o ON o.BUYER_ID = s.USER_ID
+    WHERE s.USER_ID IS NOT NULL
+    GROUP BY s.USER_ID, s.PRODUCTS_OFFERED, s.CERTIFICATIONS, s.TARGET_MARKETS, s.LOCATION
   `;
 
+  console.log('Executing seller query with orders:', query);
   const result = await db.execute({ sqlText: query });
-  return processSellerData(result.rows || result);
+  return result.rows || result;
 }
 
 function processSellerData(rawData) {
