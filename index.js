@@ -133,36 +133,41 @@ app.use('*', (req, res) => {
 // **12. Error Handling Middleware (Should be after all other routes)**
 app.use(errorHandler);
 
-if (env !== 'production') {
+// For Vercel, we need to export a handler function
+if (process.env.NODE_ENV === 'production') {
+  // Export the serverless handler
+  module.exports = async (req, res) => {
+    // Initialize database connection if needed
+    try {
+      await connectToSnowflake();
+      logger.info('Database connection established.');
+    } catch (error) {
+      logger.error(`Failed to connect to database: ${error.message}`);
+    }
+    
+    // Handle the request using the Express app
+    return app(req, res);
+  };
+} else {
+  // Development mode
+  const PORT = process.env.PORT || 5000;
+  
   (async () => {
     try {
       await connectToSnowflake();
       logger.info('Database connection established.');
-
-      // Initialize socket.io ONCE
-      const io = setupWebSocket(server);
       
-      // Start the server ONCE
-      server.listen(PORT, '0.0.0.0', () => {
-        logger.info(`Server running on port ${PORT} with socket.io`);
+      app.listen(PORT, '0.0.0.0', () => {
+        logger.info(`Server running on port ${PORT}`);
       });
-
+      
       scheduler();
     } catch (error) {
       logger.error(`Failed to connect to database: ${error.message}`);
       process.exit(1);
     }
   })();
-} else {
-  // Production initialization
-  (async () => {
-    try {
-      await connectToSnowflake();
-      logger.info('Database connection established.');
-    } catch (error) {
-      logger.error(`Failed to connect to database: ${error.message}`);
-    }
-  })();
+  
+  // Export the app for testing
+  module.exports = app;
 }
-
-module.exports = { app, server };
