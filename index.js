@@ -33,6 +33,7 @@ const sellerProductsRouter = require('./routes/sellerProducts');
 const buyersRouter = require('./routes/buyers');
 const matchmakingRoutes = require('./routes/matchmaking');
 const euRequirementsRouter = require('./routes/eu-requirements');
+const chatRouter = require('./routes/chat');
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -43,8 +44,20 @@ if (env !== 'production') {
 const verifyCompanyRouter = require('./routes/verifyCompany');
 const activitiesRouter = require('./routes/activities');
 const testRouter = require('./routes/test');
+const { setupWebSocket } = require('./services/socket');
 
 const app = express();
+const PORT = process.env.PORT || 5000;
+const server = require('http').createServer(app);
+const { Server } = require('socket.io');
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
+});
 
 // **1. Set Trust Proxy**
 app.set('trust proxy', 1); // Trust the first proxy (Vercel)
@@ -116,6 +129,7 @@ app.use('/api/buyers', buyersRouter);
 app.use('/api', matchmakingRoutes);
 app.use('/test', testRouter);
 app.use('/api', euRequirementsRouter);
+app.use('/api/chat', chatRouter);
 // **9. Root Route**
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');
@@ -147,12 +161,14 @@ if (env !== 'production') {
       logger.info('Database connection established.');
 
       // Start the server
-      app.listen(PORT, '0.0.0.0', () => {
+      const server = app.listen(PORT, '0.0.0.0', () => {
         logger.info(`Server running on port ${PORT}`);
       });
 
       // Start the scheduler after successful DB connection
       scheduler();
+
+      setupWebSocket(server);
     } catch (error) {
       logger.error(`Failed to connect to database: ${error.message}`);
       process.exit(1); // Exit the application with an error code
@@ -175,3 +191,26 @@ if (env !== 'production') {
 
 // **15. Export Handler for Serverless Deployment**
 module.exports = app;
+
+// Debug socket connections
+io.on('connection', (socket) => {
+  console.log('New socket connection:', socket.id);
+  
+  socket.on('send_message', (data) => {
+    console.log('Message received:', data);
+    io.emit('message', data);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+  });
+});
+
+// Start server
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
