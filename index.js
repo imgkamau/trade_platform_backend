@@ -34,6 +34,7 @@ const buyersRouter = require('./routes/buyers');
 const matchmakingRoutes = require('./routes/matchmaking');
 const euRequirementsRouter = require('./routes/eu-requirements');
 const chatRouter = require('./routes/chat');
+const jwt = require('jsonwebtoken');  // Add this at the top with other imports
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -49,18 +50,9 @@ const { setupWebSocket } = require('./services/socket');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const server = require('http').createServer(app);
-const { Server } = require('socket.io');
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  transports: ['websocket', 'polling']
-});
 
 // **1. Set Trust Proxy**
-app.set('trust proxy', 1); // Trust the first proxy (Vercel)
+app.set('trust proxy', 1);
 
 // **2. CORS Configuration**
 const corsOptions = {
@@ -70,20 +62,13 @@ const corsOptions = {
       : process.env.FRONTEND_URL || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true, // Allow cookies and other credentials
-  optionsSuccessStatus: 204, // Some legacy browsers choke on 204
+  credentials: true,
+  optionsSuccessStatus: 204,
 };
 
-// Apply CORS Middleware
 app.use(cors(corsOptions));
-
-// **3. Handle Preflight OPTIONS Requests**
 app.options('*', cors(corsOptions));
-
-// **4. JSON Parsing Middleware**
 app.use(express.json());
-
-// **5. Security Middleware**
 app.use(helmet());
 
 // **6. Logging Middleware**
@@ -148,69 +133,36 @@ app.use('*', (req, res) => {
 // **12. Error Handling Middleware (Should be after all other routes)**
 app.use(errorHandler);
 
-// **13. Export as Serverless Function and Start Server Locally**
 if (env !== 'production') {
-  // **14. Start the Server Locally**
-  const PORT = process.env.PORT || 5000;
-
-  // Use an async IIFE to handle async operations at the top level
   (async () => {
     try {
-      // Establish database connection
       await connectToSnowflake();
       logger.info('Database connection established.');
 
-      // Start the server
-      const server = app.listen(PORT, '0.0.0.0', () => {
-        logger.info(`Server running on port ${PORT}`);
+      // Initialize socket.io ONCE
+      const io = setupWebSocket(server);
+      
+      // Start the server ONCE
+      server.listen(PORT, '0.0.0.0', () => {
+        logger.info(`Server running on port ${PORT} with socket.io`);
       });
 
-      // Start the scheduler after successful DB connection
       scheduler();
-
-      setupWebSocket(server);
     } catch (error) {
       logger.error(`Failed to connect to database: ${error.message}`);
-      process.exit(1); // Exit the application with an error code
+      process.exit(1);
     }
   })();
 } else {
-  // **Production Initialization**
+  // Production initialization
   (async () => {
     try {
-      // Establish database connection
       await connectToSnowflake();
       logger.info('Database connection established.');
-      // **Do not** start the server or the scheduler in production
     } catch (error) {
       logger.error(`Failed to connect to database: ${error.message}`);
-      // **Note:** Avoid exiting the process in serverless environments
     }
   })();
 }
 
-// **15. Export Handler for Serverless Deployment**
-module.exports = app;
-
-// Debug socket connections
-io.on('connection', (socket) => {
-  console.log('New socket connection:', socket.id);
-  
-  socket.on('send_message', (data) => {
-    console.log('Message received:', data);
-    io.emit('message', data);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
-
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
-  });
-});
-
-// Start server
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+module.exports = { app, server };

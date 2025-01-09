@@ -1,22 +1,38 @@
 const { Server } = require('socket.io');
-const { verifyToken } = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
 
 function setupWebSocket(server) {
   const io = new Server(server, {
     cors: {
       origin: "*",
-      methods: ["GET", "POST"]
+      methods: ["GET", "POST"],
+      credentials: true
     }
   });
 
   // Authentication middleware
   io.use(async (socket, next) => {
+    console.log('Socket auth attempt');
     try {
       const token = socket.handshake.auth.token;
-      const decoded = await verifyToken(token);
-      socket.user = decoded;
+      console.log('Token received:', token ? 'present' : 'missing');
+      
+      if (!token) {
+        throw new Error('No token provided');
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log('Token decoded:', decoded);
+      
+      if (!decoded || !decoded.user) {
+        throw new Error('Invalid token structure');
+      }
+
+      socket.user = decoded.user;
+      console.log('User authenticated:', socket.user);
       next();
     } catch (err) {
+      console.error('Socket auth error:', err.message);
       next(new Error('Authentication error'));
     }
   });
