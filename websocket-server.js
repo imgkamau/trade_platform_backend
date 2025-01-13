@@ -12,11 +12,10 @@ const app = express();
 
 // CORS Configuration
 const corsOptions = {
-  origin: env === 'production'
-    ? process.env.FRONTEND_URL || 'https://ke-eutrade.org'
-    : process.env.FRONTEND_URL || 'http://localhost:3000',
-  methods: ['GET', 'POST'],
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
@@ -26,12 +25,15 @@ const io = setupWebSocket(server);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  console.log('Health check requested');
   res.status(200).json({ status: 'OK', service: 'WebSocket Server' });
 });
 
-const PORT = process.env.SOCKET_PORT || 8080;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`WebSocket server running on port ${PORT}`);
+  console.log('Environment:', env);
+  console.log('CORS origin:', corsOptions.origin);
 });
 
 // Handle graceful shutdown
