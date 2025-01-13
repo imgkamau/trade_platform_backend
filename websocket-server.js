@@ -261,6 +261,69 @@ app.get('/health', (req, res) => {
   }
 });
 
+// Add this function to get conversations for a user
+async function getUserConversations(userId) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT DISTINCT
+        m1.SENDER_ID,
+        m1.RECIPIENT_ID,
+        m2.MESSAGE_TEXT as last_message,
+        m2.TIMESTAMP as last_message_time,
+        (
+          SELECT COUNT(*)
+          FROM CHAT_MESSAGES
+          WHERE RECIPIENT_ID = ?
+          AND SENDER_ID IN (m1.SENDER_ID, m1.RECIPIENT_ID)
+          AND IS_READ = false
+        ) as unread_count
+      FROM CHAT_MESSAGES m1
+      JOIN CHAT_MESSAGES m2 ON (
+        (m2.SENDER_ID = m1.SENDER_ID AND m2.RECIPIENT_ID = m1.RECIPIENT_ID) OR
+        (m2.SENDER_ID = m1.RECIPIENT_ID AND m2.RECIPIENT_ID = m1.SENDER_ID)
+      )
+      WHERE ? IN (m1.SENDER_ID, m1.RECIPIENT_ID)
+      GROUP BY m1.SENDER_ID, m1.RECIPIENT_ID
+      ORDER BY MAX(m2.TIMESTAMP) DESC
+    `;
+
+    connection.execute({
+      sqlText: query,
+      binds: [userId, userId],
+      complete: (err, stmt, rows) => {
+        if (err) {
+          console.error('Failed to fetch conversations:', err);
+          resolve([]);
+          return;
+        }
+        console.log('Conversations found:', rows?.length || 0);
+        resolve(rows || []);
+      }
+    });
+  });
+}
+
+// Add an endpoint to get conversations
+app.get('/chat/conversations', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.user.id;
+
+    const conversations = await getUserConversations(userId);
+    console.log(`Found ${conversations.length} conversations for user ${userId}`);
+
+    res.json(conversations);
+  } catch (error) {
+    console.error('Error fetching conversations:', error);
+    res.status(500).json({ message: 'Failed to fetch conversations' });
+  }
+});
+
 // Update your server startup
 httpServer.listen(process.env.PORT || 8080, () => {
   console.log('=================================');
