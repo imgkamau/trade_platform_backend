@@ -125,13 +125,19 @@ io.on('connection', (socket) => {
 
   // When joining chat, send history
   socket.on('join_chat', async ({ recipientId }) => {
-    const roomId = [socket.user.id, recipientId].sort().join('-');
-    socket.join(roomId);
-    console.log(`User ${socket.user.id} joined room ${roomId}`);
+    try {
+      const roomId = [socket.user.id, recipientId].sort().join('-');
+      socket.join(roomId);
+      console.log(`User ${socket.user.id} joined room ${roomId}`);
 
-    // Get and send chat history
-    const history = await getChatHistory(socket.user.id, recipientId);
-    socket.emit('chat_history', history);
+      // Get and send chat history
+      const history = await getChatHistory(socket.user.id, recipientId);
+      console.log('Sending chat history:', history.length, 'messages');
+      socket.emit('chat_history', history || []); // Ensure we always send an array
+    } catch (error) {
+      console.error('Error in join_chat:', error);
+      socket.emit('error', { message: 'Failed to load chat history' });
+    }
   });
 
   socket.on('send_message', async (messageData) => {
