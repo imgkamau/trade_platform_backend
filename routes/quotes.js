@@ -142,7 +142,7 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid price. Must be a positive number.' });
     }
 
-    // Check if the quote exists and belongs to the seller
+    // Get quote details and check permissions
     const quoteResult = await db.execute({
       sqlText: `
         SELECT * FROM trade.gwtrade.QUOTES
@@ -154,6 +154,8 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
     if (quoteResult.length === 0) {
       return res.status(404).json({ message: 'Quote not found or you do not have permission to respond to this quote.' });
     }
+
+    const quote = quoteResult[0];
 
     // Update the quote with the response
     await db.execute({
@@ -168,15 +170,13 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
     // Log activity
     await logActivity(sellerId, `Responded to quote request ${id}`, 'quote');
 
-    // Send notification to the buyer (you can implement this later)
-
-    // Clear caches after response
+    // Clear caches using the stored quote details
     await clearQuoteCache(quote.BUYER_ID, sellerId, id);
     
     res.status(200).json({ message: 'Quote response submitted successfully.' });
   } catch (error) {
     console.error('Error responding to quote:', error);
-    res.status(500).json({ message: 'An error occurred while responding to the quote.', error: error.message });
+    res.status(500).json({ message: 'An error occurred while responding to the quote.' });
   }
 });
 
