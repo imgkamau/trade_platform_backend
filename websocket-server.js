@@ -100,18 +100,31 @@ async function saveMessage(message) {
 // Add function to get chat history
 async function getChatHistory(userId, recipientId) {
   const query = `
-    SELECT * FROM CHAT_MESSAGES 
+    SELECT 
+      MESSAGE_ID as id,
+      SENDER_ID as senderId,
+      RECIPIENT_ID as recipientId,
+      MESSAGE_TEXT as text,
+      TIMESTAMP as timestamp,
+      IS_READ as isRead
+    FROM CHAT_MESSAGES 
     WHERE (SENDER_ID = ? AND RECIPIENT_ID = ?)
-    OR (SENDER_ID = ? AND RECIPIENT_ID = ?)
-    ORDER BY TIMESTAMP ASC
+       OR (SENDER_ID = ? AND RECIPIENT_ID = ?)
+    ORDER BY TIMESTAMP DESC
   `;
 
   try {
+    console.log('Fetching chat history for:', { userId, recipientId });
     const result = await snowflake.execute({
       sqlText: query,
       binds: [userId, recipientId, recipientId, userId]
     });
-    return result.rows;
+    console.log('Chat history result:', {
+      rowCount: result.rows?.length,
+      firstMessage: result.rows?.[0],
+      lastMessage: result.rows?.[result.rows.length - 1]
+    });
+    return result.rows || [];
   } catch (error) {
     console.error('Error fetching chat history:', error);
     return [];
@@ -130,10 +143,14 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       console.log(`User ${socket.user.id} joined room ${roomId}`);
 
-      // Get and send chat history
       const history = await getChatHistory(socket.user.id, recipientId);
-      console.log('Sending chat history:', history.length, 'messages');
-      socket.emit('chat_history', history || []); // Ensure we always send an array
+      console.log('Sending chat history to user:', {
+        userId: socket.user.id,
+        recipientId,
+        messageCount: history.length
+      });
+      
+      socket.emit('chat_history', history);
     } catch (error) {
       console.error('Error in join_chat:', error);
       socket.emit('error', { message: 'Failed to load chat history' });
