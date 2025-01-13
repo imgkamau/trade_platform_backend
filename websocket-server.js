@@ -2,7 +2,10 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const snowflake = require('./db');  // Your Snowflake connection
+
 const app = express();
+const connectedUsers = new Map();
 
 // Error handling
 process.on('uncaughtException', (error) => {
@@ -61,33 +64,103 @@ io.use(async (socket, next) => {
   }
 });
 
+// Add function to save message to database
+async function saveMessage(message) {
+  const query = `
+    INSERT INTO CHAT_MESSAGES (
+      MESSAGE_ID,
+      SENDER_ID,
+      RECIPIENT_ID,
+      MESSAGE_TEXT,
+      TIMESTAMP,
+      IS_READ
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `;
+
+  try {
+    await snowflake.execute({
+      sqlText: query,
+      binds: [
+        message.id,
+        message.senderId,
+        message.recipientId,
+        message.text,
+        message.timestamp,
+        false  // Initially unread
+      ]
+    });
+    console.log('Message saved to database:', message.id);
+    return true;
+  } catch (error) {
+    console.error('Error saving message:', error);
+    return false;
+  }
+}
+
+// Add function to get chat history
+async function getChatHistory(userId, recipientId) {
+  const query = `
+    SELECT * FROM CHAT_MESSAGES 
+    WHERE (SENDER_ID = ? AND RECIPIENT_ID = ?)
+    OR (SENDER_ID = ? AND RECIPIENT_ID = ?)
+    ORDER BY TIMESTAMP ASC
+  `;
+
+  try {
+    const result = await snowflake.execute({
+      sqlText: query,
+      binds: [userId, recipientId, recipientId, userId]
+    });
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching chat history:', error);
+    return [];
+  }
+}
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id, 'User:', socket.user.id);
+  connectedUsers.set(socket.user.id, socket.id);
 
-  // Join chat room
-  socket.on('join_chat', ({ recipientId }) => {
+  // When joining chat, send history
+  socket.on('join_chat', async ({ recipientId }) => {
     const roomId = [socket.user.id, recipientId].sort().join('-');
     socket.join(roomId);
     console.log(`User ${socket.user.id} joined room ${roomId}`);
+
+    // Get and send chat history
+    const history = await getChatHistory(socket.user.id, recipientId);
+    socket.emit('chat_history', history);
   });
 
-  // Handle messages
-  socket.on('send_message', (messageData) => {
+  socket.on('send_message', async (messageData) => {
     try {
-      const roomId = [socket.user.id, messageData.recipientId].sort().join('-');
-      
       const message = {
         id: require('crypto').randomUUID(),
         senderId: socket.user.id,
         recipientId: messageData.recipientId,
         text: messageData.text,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        isRead: false
       };
 
-      // Broadcast to room
+      // Save to database first
+      const saved = await saveMessage(message);
+      if (!saved) {
+        throw new Error('Failed to save message');
+      }
+
+      // Broadcast to room if recipient is online
+      const roomId = [socket.user.id, messageData.recipientId].sort().join('-');
       io.to(roomId).emit('message', message);
-      console.log(`Message sent in room ${roomId}:`, message);
+
+      // Confirm to sender
+      socket.emit('message_sent', { 
+        success: true, 
+        messageId: message.id,
+        delivered: connectedUsers.has(messageData.recipientId)
+      });
 
     } catch (error) {
       console.error('Message handling error:', error);
@@ -96,7 +169,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id, 'User:', socket.user.id);
+    connectedUsers.delete(socket.user.id);
+    console.log('Client disconnected:', socket.id);
   });
 });
 
