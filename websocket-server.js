@@ -1,4 +1,6 @@
 const express = require('express');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 const app = express();
 
 // Error handling
@@ -16,12 +18,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((err, req, res, next) => {
-  console.error('Express error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Simple routes with logging
+// Simple routes
 app.get('/', (req, res) => {
   console.log('Root route hit');
   res.send('Server is running');
@@ -32,14 +29,33 @@ app.get('/health', (req, res) => {
   res.send('OK');
 });
 
+// Create HTTP server
+const httpServer = createServer(app);
+
+// Setup Socket.IO
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+// Basic Socket.IO connection
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
 // Server startup with detailed logging
 const PORT = process.env.PORT || 8080;
-const server = app.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('=================================');
   console.log(`Server starting on port ${PORT}`);
   console.log('Environment:', process.env.NODE_ENV);
-  console.log('Current directory:', process.cwd());
-  console.log('Node version:', process.version);
+  console.log('Socket.IO server enabled');
   console.log('=================================');
 }).on('error', (error) => {
   console.error('Server startup error:', error);
