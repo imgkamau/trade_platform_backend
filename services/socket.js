@@ -39,20 +39,17 @@ function setupWebSocket(server) {
 
   // Handle connections
   io.on('connection', (socket) => {
-    console.log('User connected with ID:', socket.id, 'User:', socket.user.id);
+    console.log('User connected:', socket.user.id);
     
-    // Join a room specific to this chat
     socket.on('join_chat', ({ recipientId }) => {
       const roomId = [socket.user.id, recipientId].sort().join('-');
       socket.join(roomId);
-      console.log(`User ${socket.user.id} joined room ${roomId}. Active rooms:`, socket.rooms);
+      console.log(`User ${socket.user.id} joined room ${roomId}`);
     });
 
     socket.on('send_message', async (messageData) => {
       try {
-        console.log('Received message data:', messageData);
         const roomId = [socket.user.id, messageData.recipientId].sort().join('-');
-        console.log('Processing message in room:', roomId);
         
         const message = {
           id: require('crypto').randomUUID(),
@@ -61,18 +58,11 @@ function setupWebSocket(server) {
           text: messageData.text,
           timestamp: new Date().toISOString()
         };
-        console.log('Created message object:', message);
 
-        // Save message to database
-        await saveMessageToDb(message);
-        console.log('Message saved to database');
-
-        // Broadcast to room
+        // Broadcast to room immediately without saving to DB
         io.to(roomId).emit('message', message);
-        console.log(`Message broadcasted to room ${roomId}`);
+        console.log(`Message sent in room ${roomId}:`, message);
         
-        // Acknowledge message receipt
-        socket.emit('message_sent', { success: true, messageId: message.id });
       } catch (error) {
         console.error('Message handling error:', error);
         socket.emit('error', { message: 'Failed to send message' });
@@ -80,40 +70,11 @@ function setupWebSocket(server) {
     });
 
     socket.on('disconnect', () => {
-      console.log('User disconnected:', socket.user.id, 'Socket:', socket.id);
+      console.log('User disconnected:', socket.user.id);
     });
   });
 
   return io;
-}
-
-async function saveMessageToDb(message) {
-  const db = require('../db');
-  const query = `
-    INSERT INTO CHAT_MESSAGES (
-      MESSAGE_ID, 
-      SENDER_ID, 
-      RECIPIENT_ID, 
-      MESSAGE_TEXT, 
-      TIMESTAMP
-    ) VALUES (?, ?, ?, ?, ?)
-  `;
-
-  try {
-    await db.execute({
-      sqlText: query,
-      binds: [
-        message.id,
-        message.senderId,
-        message.recipientId,
-        message.text,
-        message.timestamp
-      ]
-    });
-  } catch (error) {
-    console.error('Error saving message:', error);
-    throw error;
-  }
 }
 
 module.exports = { setupWebSocket }; 
