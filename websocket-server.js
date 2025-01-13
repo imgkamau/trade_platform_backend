@@ -1,21 +1,46 @@
 const express = require('express');
 const app = express();
 
-// Basic middleware
-app.use(express.json());
+// Error handling
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
 
-// Simple health check
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error);
+});
+
+// Basic middleware with error logging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
+
+app.use((err, req, res, next) => {
+  console.error('Express error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Simple routes with logging
+app.get('/', (req, res) => {
+  console.log('Root route hit');
+  res.send('Server is running');
+});
+
 app.get('/health', (req, res) => {
   console.log('Health check hit');
-  res.status(200).json({ status: 'OK', message: 'Server is running' });
+  res.send('OK');
 });
 
-// Root route
-app.get('/', (req, res) => {
-  res.status(200).json({ message: 'WebSocket server root' });
-});
-
+// Server startup with detailed logging
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log('=================================');
+  console.log(`Server starting on port ${PORT}`);
+  console.log('Environment:', process.env.NODE_ENV);
+  console.log('Current directory:', process.cwd());
+  console.log('Node version:', process.version);
+  console.log('=================================');
+}).on('error', (error) => {
+  console.error('Server startup error:', error);
 });
