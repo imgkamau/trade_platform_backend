@@ -233,10 +233,38 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 8080;
-httpServer.listen(PORT, '0.0.0.0', () => {
+// Add health check endpoint
+app.get('/health', (req, res) => {
+  try {
+    // Check database connection
+    const dbHealthy = connection && connection.isUp();
+    
+    if (dbHealthy) {
+      res.status(200).json({
+        status: 'healthy',
+        database: 'connected',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(503).json({
+        status: 'unhealthy',
+        database: 'disconnected',
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Update your server startup
+httpServer.listen(process.env.PORT || 8080, () => {
   console.log('=================================');
-  console.log(`WebSocket server running on port ${PORT}`);
-  console.log('Environment:', process.env.NODE_ENV);
+  console.log(`Server running on port ${process.env.PORT || 8080}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log('=================================');
 });
