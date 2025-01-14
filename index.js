@@ -35,6 +35,7 @@ const matchmakingRoutes = require('./routes/matchmaking');
 const euRequirementsRouter = require('./routes/eu-requirements');
 const chatRouter = require('./routes/chat');
 const jwt = require('jsonwebtoken');  // Add this at the top with other imports
+const checkSubscription = require('../middleware/checkSubscription');
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -94,27 +95,31 @@ app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
 
 // **8. Mount Routers**
+// Public routes (no subscription check)
 app.use('/api/auth', authRouter);
 app.use('/api/products', productsRouter);
-app.use('/api/checklists', checklistsRouter);
-app.use('/api/quotes', quotesRoutes);
-app.use('/api/regulations', regulationsRouter);
-app.use('/api/logistics', logisticsRouter);
-app.use('/api/documents', documentsRouter);
-app.use('/api/shipping', shippingRouter);
-app.use('/api/orders', ordersRouter);
-app.use('/api/messages', messagesRouter); // Messages Router
-app.use('/api/analytics', analyticsRouter);
-app.use('/api/inquiries', inquiriesRouter);
-app.use('/api/contacts', contactsRouter);
-app.use('/api/seller-products', sellerProductsRouter);
 app.use('/api', verifyCompanyRouter);
-app.use('/api/activities', activitiesRouter);
-app.use('/api/buyers', buyersRouter);
 app.use('/api', matchmakingRoutes);
 app.use('/test', testRouter);
 app.use('/api', euRequirementsRouter);
-app.use('/api/chat', chatRouter);
+
+// Protected routes (with subscription check)
+app.use('/api/checklists', checkSubscription, checklistsRouter);
+app.use('/api/quotes', checkSubscription, quotesRoutes);
+app.use('/api/regulations', checkSubscription, regulationsRouter);
+app.use('/api/logistics', checkSubscription, logisticsRouter);
+app.use('/api/documents', checkSubscription, documentsRouter);
+app.use('/api/shipping', checkSubscription, shippingRouter);
+app.use('/api/orders', checkSubscription, ordersRouter);
+app.use('/api/messages', checkSubscription, messagesRouter);
+app.use('/api/analytics', checkSubscription, analyticsRouter);
+app.use('/api/inquiries', checkSubscription, inquiriesRouter);
+app.use('/api/contacts', checkSubscription, contactsRouter);
+app.use('/api/seller-products', checkSubscription, sellerProductsRouter);
+app.use('/api/activities', checkSubscription, activitiesRouter);
+app.use('/api/buyers', checkSubscription, buyersRouter);
+app.use('/api/chat', checkSubscription, chatRouter);
+
 // **9. Root Route**
 app.get('/', (req, res) => {
   res.send('Welcome to the Products API');
