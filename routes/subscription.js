@@ -350,4 +350,40 @@ router.get('/debug-status', async (req, res) => {
   }
 });
 
+router.post('/verify', authenticateToken, async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    const userId = req.user.id;
+    const userType = req.user.role; // 'buyer' or 'seller'
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status === 'paid') {
+      await db.query(`
+        INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS (
+          USER_ID, 
+          STRIPE_SUBSCRIPTION_ID, 
+          STATUS, 
+          TRIAL_END
+        ) VALUES (?, ?, ?, ?)
+      `, [
+        userId,
+        session.subscription,
+        'active',
+        new Date(Date.now() + (7 * 24 * 60 * 60 * 1000))
+      ]);
+
+      return res.json({ 
+        success: true,
+        userType // Return the user type
+      });
+    }
+
+    res.status(400).json({ success: false });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ success: false });
+  }
+});
+
 module.exports = router;
