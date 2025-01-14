@@ -264,64 +264,35 @@ router.post('/create-checkout-session', async (req, res) => {
 
 // Add webhook handler for Stripe events
 router.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  
   try {
-    const sig = req.headers['stripe-signature'];
     const event = stripe.webhooks.constructEvent(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
 
-    // Handle different webhook events
+    // Handle the webhook event
     switch (event.type) {
       case 'checkout.session.completed':
         const session = event.data.object;
-        
-        // Update subscription status to active
         await db.execute({
           sqlText: `
             UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
             SET STATUS = 'active',
                 START_DATE = CURRENT_TIMESTAMP(),
-                END_DATE = DATEADD(month, 1, CURRENT_TIMESTAMP()),
-                STRIPE_SUBSCRIPTION_ID = ?,
-                UPDATED_AT = CURRENT_TIMESTAMP()
+                END_DATE = DATEADD(month, 1, CURRENT_TIMESTAMP())
             WHERE STRIPE_SESSION_ID = ?`,
-          binds: [session.subscription, session.id]
-        });
-
-        logger.info('Subscription activated:', {
-          sessionId: session.id,
-          subscriptionId: session.subscription
-        });
-        break;
-
-      case 'customer.subscription.deleted':
-        const subscription = event.data.object;
-        
-        // Update subscription status to cancelled
-        await db.execute({
-          sqlText: `
-            UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
-            SET STATUS = 'cancelled',
-                UPDATED_AT = CURRENT_TIMESTAMP()
-            WHERE STRIPE_SUBSCRIPTION_ID = ?`,
-          binds: [subscription.id]
-        });
-
-        logger.info('Subscription cancelled:', {
-          subscriptionId: subscription.id
+          binds: [session.id]
         });
         break;
     }
 
     res.json({received: true});
-  } catch (error) {
-    logger.error('Webhook error:', error);
-    res.status(400).json({
-      message: 'Webhook error',
-      error: error.message
-    });
+  } catch (err) {
+    logger.error('Webhook error:', err);
+    res.status(400).send(`Webhook Error: ${err.message}`);
   }
 });
 
