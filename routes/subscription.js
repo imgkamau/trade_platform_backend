@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
-const { execute } = require('../db');
+const db = require('../db');
+const authMiddleware = require('../middleware/auth');
 const logger = require('../utils/logger');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
@@ -20,7 +20,7 @@ router.post('/create-trial-session', async (req, res) => {
       AND END_DATE > CURRENT_TIMESTAMP()
       AND STATUS IN ('active', 'trial')`;
 
-    const activeSubscriptions = await execute({
+    const activeSubscriptions = await db.execute({
       sqlText: activeSubscriptionQuery,
       binds: [userId]
     });
@@ -33,7 +33,7 @@ router.post('/create-trial-session', async (req, res) => {
       SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS
       WHERE USER_ID = ?`;
 
-    const allSubscriptions = await execute({
+    const allSubscriptions = await db.execute({
       sqlText: allSubscriptionsQuery,
       binds: [userId]
     });
@@ -55,7 +55,7 @@ router.post('/create-trial-session', async (req, res) => {
       WHERE USER_ID = ?
       AND STATUS = 'trial'`;
 
-    const trialHistory = await execute({
+    const trialHistory = await db.execute({
       sqlText: trialHistoryQuery,
       binds: [userId]
     });
@@ -89,7 +89,7 @@ router.post('/create-trial-session', async (req, res) => {
     });
 
     // Create pending trial subscription record
-    await execute({
+    await db.execute({
       sqlText: `
         INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS
         (USER_ID, STATUS, STRIPE_SESSION_ID, USER_TYPE)
@@ -116,7 +116,7 @@ router.get('/status', async (req, res) => {
   try {
     const userId = req.user.id || req.user.user?.id;
     
-    const subscriptions = await execute({
+    const subscriptions = await db.execute({
       sqlText: `
         SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS 
         WHERE USER_ID = ? 
@@ -159,7 +159,7 @@ router.post('/create-checkout-session', async (req, res) => {
       SELECT * FROM TRADE.GWTRADE.USERS 
       WHERE USER_ID = ?`;
 
-    const userResult = await execute({
+    const userResult = await db.execute({
       sqlText: userQuery,
       binds: [userId]
     });
@@ -174,7 +174,7 @@ router.post('/create-checkout-session', async (req, res) => {
     const user = userResult[0];
 
     // Get subscription price details
-    const priceDetails = await execute({
+    const priceDetails = await db.execute({
       sqlText: `
         SELECT * FROM TRADE.GWTRADE.SUBSCRIPTION_PRICES
         WHERE PRICE_ID = ? AND USER_TYPE = ?`,
@@ -204,7 +204,7 @@ router.post('/create-checkout-session', async (req, res) => {
       });
 
       // Update user with Stripe customer ID
-      await execute({
+      await db.execute({
         sqlText: `
           UPDATE TRADE.GWTRADE.USERS 
           SET STRIPE_CUSTOMER_ID = ? 
@@ -232,7 +232,7 @@ router.post('/create-checkout-session', async (req, res) => {
     });
 
     // Create pending subscription record
-    await execute({
+    await db.execute({
       sqlText: `
         INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS
         (USER_ID, STATUS, STRIPE_SESSION_ID, PRICE_ID, USER_TYPE)
@@ -278,7 +278,7 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         const session = event.data.object;
         
         // Update subscription status to active
-        await execute({
+        await db.execute({
           sqlText: `
             UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
             SET STATUS = 'active',
@@ -300,7 +300,7 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
         const subscription = event.data.object;
         
         // Update subscription status to cancelled
-        await execute({
+        await db.execute({
           sqlText: `
             UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
             SET STATUS = 'cancelled',
@@ -330,7 +330,7 @@ router.get('/debug-status', async (req, res) => {
   try {
     const userId = req.user.id || req.user.user?.id;
     
-    const allSubscriptions = await execute({
+    const allSubscriptions = await db.execute({
       sqlText: `
         SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS 
         WHERE USER_ID = ?
@@ -351,38 +351,37 @@ router.get('/debug-status', async (req, res) => {
   }
 });
 
-router.post('/verify', authenticateToken, async (req, res) => {
+router.post('/verify', authMiddleware, async (req, res) => {
   try {
     const { sessionId } = req.body;
     const userId = req.user.id;
-    const userType = req.user.role; // 'buyer' or 'seller'
+    const userType = req.user.role;
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     if (session.payment_status === 'paid') {
-      await db.query(`
-        INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS (
-          USER_ID, 
-          STRIPE_SUBSCRIPTION_ID, 
-          STATUS, 
-          TRIAL_END
-        ) VALUES (?, ?, ?, ?)
-      `, [
-        userId,
-        session.subscription,
-        'active',
-        new Date(Date.now() + (7 * 24 * 60 * 60 * 1000))
-      ]);
+      await db.execute({
+        sqlText: `
+          INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS
+          (USER_ID, STRIPE_SUBSCRIPTION_ID, STATUS, TRIAL_END)
+          VALUES (?, ?, ?, ?)`,
+        binds: [
+          userId,
+          session.subscription,
+          'active',
+          new Date(Date.now() + (7 * 24 * 60 * 60 * 1000))
+        ]
+      });
 
       return res.json({ 
         success: true,
-        userType // Return the user type
+        userType 
       });
     }
 
     res.status(400).json({ success: false });
   } catch (error) {
-    console.error('Error:', error);
+    logger.error('Error verifying subscription:', error);
     res.status(500).json({ success: false });
   }
 });
