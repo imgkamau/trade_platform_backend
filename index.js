@@ -35,7 +35,7 @@ const matchmakingRoutes = require('./routes/matchmaking');
 const euRequirementsRouter = require('./routes/eu-requirements');
 const chatRouter = require('./routes/chat');
 const jwt = require('jsonwebtoken');  // Add this at the top with other imports
-const checkSubscription = require('../middleware/checkSubscription');
+const checkSubscription = require('./middleware/checkSubscription');
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
