@@ -78,8 +78,8 @@ router.post('/create-trial-session', async (req, res) => {
       subscription_data: {
         trial_period_days: trialDays,
       },
-      success_url: `https://www.ke-eutrade.org/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `https://www.ke-eutrade.org/subscription/cancel`,
+      success_url: `https://ke-eutrade.org/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://ke-eutrade.org/subscription/cancel`,
       customer_email: req.user.email,
       metadata: {
         userId,
