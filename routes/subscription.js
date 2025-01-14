@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { authenticateToken } = require('../middleware/auth');
 const { execute } = require('../db');
 const logger = require('../utils/logger');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
