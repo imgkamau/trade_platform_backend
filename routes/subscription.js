@@ -18,8 +18,8 @@ router.post('/create-checkout-session', auth, async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
+      success_url: `com.keeutrade.neta://subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `com.keeutrade.neta://subscription/cancel`,
       customer_email: req.user.email,
       metadata: {
         userId,
@@ -35,7 +35,7 @@ router.post('/create-checkout-session', auth, async (req, res) => {
 });
 
 // Webhook to handle successful subscriptions
-router.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -52,7 +52,7 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    
+
     // Add subscription to database
     await connection.execute({
       sqlText: `
@@ -81,7 +81,7 @@ router.post('/start-trial', auth, async (req, res) => {
   try {
     const { userId } = req.user;
     const { subscriptionType } = req.body;
-    
+
     const subscription = await connection.execute({
       sqlText: `
         INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS (
@@ -105,7 +105,7 @@ router.post('/start-trial', auth, async (req, res) => {
 router.get('/status', auth, async (req, res) => {
   try {
     const { userId } = req.user;
-    
+
     const subscription = await connection.execute({
       sqlText: `
         SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS 
@@ -119,5 +119,38 @@ router.get('/status', auth, async (req, res) => {
     res.json(subscription);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch subscription status' });
+  }
+});
+
+router.post('/create-trial-session', auth, async (req, res) => {
+  try {
+    const { userType, priceId } = req.body;
+    const { userId } = req.user;
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'subscription',
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      subscription_data: {
+        trial_period_days: 7,
+      },
+      success_url: `com.keeutrade.neta://subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `com.keeutrade.neta://subscription/cancel`,
+      customer_email: req.user.email,
+      metadata: {
+        userId,
+        userType
+      }
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('Stripe trial session creation error:', error);
+    res.status(500).json({ message: 'Failed to create trial session' });
   }
 }); 
