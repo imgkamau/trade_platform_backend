@@ -18,7 +18,7 @@ router.post('/create-trial-session', async (req, res) => {
       SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS
       WHERE USER_ID = ?
       AND END_DATE > CURRENT_TIMESTAMP()
-      AND STATUS IN ('active', 'trial')`;
+      AND STATUS IN ('active', 'trial', 'pending_trial')`;
 
     const activeSubscriptions = await db.execute({
       sqlText: activeSubscriptionQuery,
@@ -92,9 +92,9 @@ router.post('/create-trial-session', async (req, res) => {
     await db.execute({
       sqlText: `
         INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS
-        (USER_ID, STATUS, STRIPE_SESSION_ID, USER_TYPE)
-        VALUES (?, 'pending_trial', ?, ?)`,
-      binds: [userId, session.id, userType]
+        (USER_ID, STATUS, STRIPE_SESSION_ID, USER_TYPE, START_DATE, END_DATE)
+        VALUES (?, 'pending_trial', ?, ?, CURRENT_TIMESTAMP(), DATEADD(day, ?, CURRENT_TIMESTAMP()))`,
+      binds: [userId, session.id, userType, trialDays]
     });
 
     res.json({
@@ -282,7 +282,10 @@ router.post('/webhook', express.raw({type: 'application/json'}), async (req, res
             UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
             SET STATUS = 'active',
                 START_DATE = CURRENT_TIMESTAMP(),
-                END_DATE = DATEADD(month, 1, CURRENT_TIMESTAMP())
+                END_DATE = CASE 
+                  WHEN STATUS = 'pending_trial' THEN DATEADD(day, 7, CURRENT_TIMESTAMP())
+                  ELSE DATEADD(month, 1, CURRENT_TIMESTAMP())
+                END
             WHERE STRIPE_SESSION_ID = ?`,
           binds: [session.id]
         });
