@@ -5,6 +5,9 @@ const authMiddleware = require('../middleware/auth');
 const logger = require('../utils/logger');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
+// All routes use auth middleware
+router.use(authMiddleware);
+
 // Create trial subscription
 router.post('/create-trial-session', async (req, res) => {
   try {
@@ -262,63 +265,33 @@ router.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// Add webhook handler for Stripe events
-router.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  
+// Verify session endpoint
+router.post('/verify-session', async (req, res) => {
   try {
-    const event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    const { sessionId } = req.body;
+    
+    // Get session from Stripe
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    
+    // Check if subscription exists
+    const subscription = await db.execute({
+      sqlText: `
+        SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS
+        WHERE STRIPE_SESSION_ID = ?`,
+      binds: [sessionId]
+    });
 
-    logger.info('Webhook event received:', event.type);
-
-    switch (event.type) {
-      case 'checkout.session.completed':
-        const session = event.data.object;
-        
-        // Check if this is a trial or regular subscription
-        const subscriptionQuery = `
-          SELECT USER_TYPE FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS 
-          WHERE STRIPE_SESSION_ID = ?`;
-        
-        const subscription = await db.execute({
-          sqlText: subscriptionQuery,
-          binds: [session.id]
-        });
-
-        if (subscription[0]?.USER_TYPE === 'trial') {
-          // Update to trial status
-          await db.execute({
-            sqlText: `
-              UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
-              SET STATUS = 'trial',
-                  START_DATE = CURRENT_TIMESTAMP(),
-                  END_DATE = DATEADD(day, 7, CURRENT_TIMESTAMP())
-              WHERE STRIPE_SESSION_ID = ?`,
-            binds: [session.id]
-          });
-        } else {
-          // Update to active status for regular subscriptions
-          await db.execute({
-            sqlText: `
-              UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
-              SET STATUS = 'active',
-                  START_DATE = CURRENT_TIMESTAMP(),
-                  END_DATE = DATEADD(month, 1, CURRENT_TIMESTAMP())
-              WHERE STRIPE_SESSION_ID = ?`,
-            binds: [session.id]
-          });
-        }
-        break;
+    if (session.payment_status === 'paid' && subscription.length > 0) {
+      return res.json({ 
+        success: true,
+        subscription: subscription[0]
+      });
     }
 
-    res.json({received: true});
-  } catch (err) {
-    logger.error('Webhook error:', err);
-    res.status(400).send(`Webhook Error: ${err.message}`);
+    res.status(400).json({ success: false });
+  } catch (error) {
+    logger.error('Error verifying session:', error);
+    res.status(500).json({ success: false });
   }
 });
 
@@ -345,35 +318,6 @@ router.get('/debug-status', async (req, res) => {
   } catch (error) {
     logger.error('Error in debug-status:', error);
     res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/verify', authMiddleware, async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    const userId = req.user.id;
-    
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    
-    // Instead of inserting, check existing record
-    const subscription = await db.execute({
-      sqlText: `
-        SELECT * FROM TRADE.GWTRADE.USER_SUBSCRIPTIONS
-        WHERE STRIPE_SESSION_ID = ?`,
-      binds: [sessionId]
-    });
-
-    if (session.payment_status === 'paid' && subscription.length > 0) {
-      return res.json({ 
-        success: true,
-        subscription: subscription[0]
-      });
-    }
-
-    res.status(400).json({ success: false });
-  } catch (error) {
-    logger.error('Error verifying subscription:', error);
-    res.status(500).json({ success: false });
   }
 });
 

@@ -37,6 +37,7 @@ const chatRouter = require('./routes/chat');
 const jwt = require('jsonwebtoken');  // Add this at the top with other imports
 const checkSubscription = require('./middleware/checkSubscription');
 const subscriptionRouter = require('./routes/subscription');
+const webhookRouter = require('./routes/webhook');
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -70,6 +71,11 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+
+// Add webhook route BEFORE express.json()
+app.use('/api/subscription/webhook', webhookRouter);
+
+// Then add json parsing and other middleware
 app.use(express.json());
 app.use(helmet());
 
