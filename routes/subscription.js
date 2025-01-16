@@ -222,7 +222,7 @@ router.post('/create-checkout-session', async (req, res) => {
         quantity: 1,
       }],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}&token=${req.headers.authorization}`,
       cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
       metadata: {
         userId: userId,
@@ -263,41 +263,52 @@ router.post('/create-checkout-session', async (req, res) => {
 });
 
 // Add webhook handler for Stripe events
-router.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  
-  try {
-    const event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+router.post(
+  '/webhook', 
+  express.raw({type: 'application/json'}), 
+  async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    
+    try {
+      logger.debug('Received webhook:', {
+        signature: !!sig,
+        secret: !!process.env.STRIPE_WEBHOOK_SECRET
+      });
 
-    // Handle the webhook event
-    switch (event.type) {
-      case 'checkout.session.completed':
-        const session = event.data.object;
-        await db.execute({
-          sqlText: `
-            UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
-            SET STATUS = 'active',
-                START_DATE = CURRENT_TIMESTAMP(),
-                END_DATE = CASE 
-                  WHEN STATUS = 'pending_trial' THEN DATEADD(day, 7, CURRENT_TIMESTAMP())
-                  ELSE DATEADD(month, 1, CURRENT_TIMESTAMP())
-                END
-            WHERE STRIPE_SESSION_ID = ?`,
-          binds: [session.id]
-        });
-        break;
+      const event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+
+      logger.info('Webhook event verified:', event.type);
+
+      // Handle the webhook event
+      switch (event.type) {
+        case 'checkout.session.completed':
+          const session = event.data.object;
+          await db.execute({
+            sqlText: `
+              UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
+              SET STATUS = 'active',
+                  START_DATE = CURRENT_TIMESTAMP(),
+                  END_DATE = CASE 
+                    WHEN STATUS = 'pending_trial' THEN DATEADD(day, 7, CURRENT_TIMESTAMP())
+                    ELSE DATEADD(month, 1, CURRENT_TIMESTAMP())
+                  END
+              WHERE STRIPE_SESSION_ID = ?`,
+            binds: [session.id]
+          });
+          break;
+      }
+
+      res.json({received: true});
+    } catch (err) {
+      logger.error('Webhook error:', err);
+      res.status(400).send(`Webhook Error: ${err.message}`);
     }
-
-    res.json({received: true});
-  } catch (err) {
-    logger.error('Webhook error:', err);
-    res.status(400).send(`Webhook Error: ${err.message}`);
   }
-});
+);
 
 // Add this new route
 router.get('/debug-status', async (req, res) => {
@@ -357,6 +368,27 @@ router.post('/verify', authMiddleware, async (req, res) => {
   } catch (error) {
     logger.error('Error verifying subscription:', error);
     res.status(500).json({ success: false });
+  }
+});
+
+// Add new route for session recovery
+router.get('/recover-session/:sessionId', async (req, res) => {
+  try {
+    const session = await stripe.checkout.sessions.retrieve(req.params.sessionId);
+    if (session.payment_status === 'paid') {
+      // Update subscription status
+      await db.execute({
+        sqlText: `
+          UPDATE TRADE.GWTRADE.USER_SUBSCRIPTIONS
+          SET STATUS = 'active'
+          WHERE STRIPE_SESSION_ID = ?`,
+        binds: [session.id]
+      });
+    }
+    res.json({ status: session.payment_status });
+  } catch (error) {
+    logger.error('Session recovery error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
