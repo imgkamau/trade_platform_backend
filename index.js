@@ -34,6 +34,7 @@ const buyersRouter = require('./routes/buyers');
 const matchmakingRoutes = require('./routes/matchmaking');
 const euRequirementsRouter = require('./routes/eu-requirements');
 const chatRouter = require('./routes/chat');
+const sellersRouter = require('./routes/sellers');
 const jwt = require('jsonwebtoken');  // Add this at the top with other imports
 const checkSubscription = require('./middleware/checkSubscription');
 const subscriptionRouter = require('./routes/subscription');
@@ -109,7 +110,7 @@ app.use('/api', verifyCompanyRouter);
 app.use('/api', matchmakingRoutes);
 app.use('/test', testRouter);
 app.use('/api', euRequirementsRouter);
-
+app.use('/api', sellersRouter);
 // Protected routes (with auth and subscription check)
 app.use('/api/checklists', authMiddleware, checkSubscription, checklistsRouter);
 app.use('/api/quotes', authMiddleware, checkSubscription, quotesRoutes);

@@ -6,33 +6,20 @@ const userModel = require('../models/userModel');
 const findMatches = require('../utils/matchmaking');
 
 router.get('/matchmaking', authMiddleware, async (req, res) => {
-  console.log('Matchmaking endpoint called');
-  const buyerId = req.user.id;
-
-  // Ensure the user is a buyer
-  if (req.user.role !== 'buyer') {
-    console.log('User is not a buyer');
-    return res.status(403).json({ message: 'Access denied. Only buyers can access matchmaking.' });
-  }
-
   try {
-    console.log('Fetching buyer profile');
-    // Fetch buyer's profile
-    const buyer = await userModel.getBuyerProfile(buyerId);
-    if (!buyer) {
-      console.log('Buyer profile not found');
-      return res.status(404).json({ message: 'Buyer profile not found' });
+    const result = await findMatches(req.user.id, db);
+    
+    if (result.code === 'NO_MATCHES') {
+      return res.status(200).json(result);
     }
-
-    console.log('Running matchmaking function');
-    // Use the findMatches function
-    const matches = await findMatches(buyer, db);
-    console.log('Matchmaking function completed');
-
-    res.json({ matches });
+    
+    res.json(result);
   } catch (error) {
-    console.error('Error during matchmaking:', error);
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    console.error('Matchmaking error:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to complete matchmaking process.',
+      message: 'Failed to complete matchmaking'
+    });
   }
 });
 

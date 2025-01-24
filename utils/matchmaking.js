@@ -1,30 +1,90 @@
 // utils/matchmaking.js
 
 // Enhanced matchmaking algorithm
-async function findMatches(buyer, db) {
-  console.log('Matchmaking.findMatches called');
-  
-  if (!buyer || !buyer.PRODUCT_INTERESTS) {
-    console.error('Invalid buyer data: PRODUCT_INTERESTS is required.');
-    throw new Error('Invalid buyer data: PRODUCT_INTERESTS is required.');
+async function findMatches(userId, db) {
+  if (!userId) {
+    throw new Error('User ID is required');
   }
-
-  // Parse and normalize buyer interests
-  let buyerInterests = normalizeBuyerInterests(buyer.PRODUCT_INTERESTS);
-  console.log('Normalized buyer interests:', buyerInterests);
+  
+  console.log('Finding matches for buyer:', userId);
+  
+  const query = `
+    WITH buyer AS (
+      SELECT DISTINCT
+        USER_ID,
+        PRODUCT_INTERESTS,
+        LOCATION
+      FROM trade.gwtrade.BUYERS
+      WHERE USER_ID = ?
+      LIMIT 1
+    ),
+    seller_products AS (
+      SELECT 
+        s.USER_ID,
+        u.FULL_NAME,
+        ARRAY_AGG(ARRAY_CONSTRUCT(s.PRODUCTS_OFFERED[0])) as PRODUCTS_OFFERED,
+        s.LOCATION,
+        s.YEARS_OF_EXPERIENCE,
+        s.TARGET_MARKETS
+      FROM trade.gwtrade.SELLERS s
+      JOIN trade.gwtrade.USERS u ON s.USER_ID = u.USER_ID
+      WHERE s.PRODUCTS_OFFERED IS NOT NULL
+      GROUP BY s.USER_ID, u.FULL_NAME, s.LOCATION, s.YEARS_OF_EXPERIENCE, s.TARGET_MARKETS
+    )
+    SELECT DISTINCT
+      sp.USER_ID as SELLER_ID,
+      sp.FULL_NAME as COMPANY_NAME,
+      sp.PRODUCTS_OFFERED as PRODUCT_CATEGORIES,
+      sp.LOCATION,
+      sp.YEARS_OF_EXPERIENCE,
+      sp.TARGET_MARKETS,
+      b.PRODUCT_INTERESTS as BUYER_INTERESTS,
+      ARRAY_INTERSECTION(
+        ARRAY_FLATTEN(sp.PRODUCTS_OFFERED),
+        b.PRODUCT_INTERESTS
+      ) as MATCHING_PRODUCTS,
+      ARRAY_SIZE(ARRAY_INTERSECTION(
+        ARRAY_FLATTEN(sp.PRODUCTS_OFFERED),
+        b.PRODUCT_INTERESTS
+      )) as MATCH_COUNT
+    FROM seller_products sp
+    CROSS JOIN buyer b
+    WHERE ARRAY_SIZE(ARRAY_INTERSECTION(
+      ARRAY_FLATTEN(sp.PRODUCTS_OFFERED),
+      b.PRODUCT_INTERESTS
+    )) > 0`;
 
   try {
-    // Fetch sellers with detailed information
-    const sellersData = await fetchSellersData(db);
-    console.log(`Fetched data for ${sellersData.length} sellers`);
+    console.log('Executing matchmaking query...');
+    const result = await db.execute({ 
+      sqlText: query,
+      binds: [userId]
+    });
 
-    // Calculate matches with weighted scoring
-    const matches = calculateMatches(buyerInterests, sellersData);
-    
-    return matches;
+    console.log('Raw query result:', JSON.stringify(result.rows, null, 2));
+    console.log('Number of rows returned:', result.rows?.length || 0);
+
+    if (!result.rows || result.rows.length === 0) {
+      console.log('No matches found, returning empty array');
+      return { matches: [] };
+    }
+
+    const matches = result.rows.map(seller => ({
+      SELLER_ID: seller.SELLER_ID,
+      COMPANY_NAME: seller.COMPANY_NAME,
+      MATCH_SCORE: (seller.MATCH_COUNT / seller.BUYER_INTERESTS.length) * 100,
+      PRODUCT_CATEGORIES: seller.PRODUCT_CATEGORIES,
+      MATCHING_PRODUCTS: seller.MATCHING_PRODUCTS,
+      YEARS_OF_EXPERIENCE: seller.YEARS_OF_EXPERIENCE || 0,
+      LOCATION: seller.LOCATION,
+      TARGET_MARKETS: seller.TARGET_MARKETS || []
+    }));
+
+    console.log('Processed matches:', JSON.stringify(matches, null, 2));
+    return { matches };
   } catch (error) {
-    console.error('Error in matchmaking process:', error);
-    throw new Error('Failed to complete matchmaking process.');
+    console.error('Error executing matchmaking query:', error);
+    throw error;
   }
 }
 
@@ -45,23 +105,23 @@ function normalizeBuyerInterests(interests) {
 
 async function fetchSellersData(db) {
   const query = `
-    SELECT 
+    SELECT DISTINCT
       s.USER_ID as SELLER_ID,
+      u.FULL_NAME as COMPANY_NAME,
       s.PRODUCTS_OFFERED,
-      s.CERTIFICATIONS,
-      s.TARGET_MARKETS,
       s.LOCATION,
-      COUNT(o.ORDER_ID) as TOTAL_ORDERS,
-      COUNT(CASE WHEN o.STATUS = 'Completed' THEN 1 END) as SUCCESSFUL_ORDERS
+      s.YEARS_OF_EXPERIENCE,
+      s.TARGET_MARKETS,
+      s.CERTIFICATIONS
     FROM trade.gwtrade.SELLERS s
-    LEFT JOIN trade.gwtrade.ORDERS o ON o.BUYER_ID = s.USER_ID
-    WHERE s.USER_ID IS NOT NULL
-    GROUP BY s.USER_ID, s.PRODUCTS_OFFERED, s.CERTIFICATIONS, s.TARGET_MARKETS, s.LOCATION
+    JOIN trade.gwtrade.USERS u ON s.USER_ID = u.USER_ID
+    WHERE s.PRODUCTS_OFFERED IS NOT NULL
+      AND ARRAY_SIZE(PARSE_JSON(s.PRODUCTS_OFFERED)) > 0
   `;
 
-  console.log('Executing seller query with orders:', query);
   const result = await db.execute({ sqlText: query });
-  return result.rows || result;
+  console.log('Raw sellers query result:', JSON.stringify(result.rows, null, 2));
+  return result.rows || [];
 }
 
 function processSellerData(rawData) {
@@ -88,66 +148,30 @@ function processSellerData(rawData) {
   return Array.from(sellersMap.values());
 }
 
-function calculateMatches(buyerInterests, sellers) {
-  const matches = sellers.map(seller => {
-    const matchScore = calculateMatchScore(buyerInterests, seller);
-    
-    if (matchScore.total > 0) {
-      return {
-        seller_id: seller.seller_id,
-        seller_company: seller.company_name,
-        match_details: {
-          product_match_score: matchScore.productScore,
-          experience_score: matchScore.experienceScore,
-          performance_score: matchScore.performanceScore,
-          total_score: matchScore.total
-        },
-        shared_products: matchScore.sharedProducts,
-        performance_metrics: {
-          success_rate: (seller.performance_metrics.successful_orders / 
-                        Math.max(seller.performance_metrics.total_orders, 1) * 100).toFixed(1),
-          avg_response_time: seller.performance_metrics.avg_response_time.toFixed(1),
-          total_orders: seller.performance_metrics.total_orders
-        }
-      };
-    }
-    return null;
-  })
-  .filter(match => match !== null)
-  .sort((a, b) => b.match_details.total_score - a.match_details.total_score);
-
-  return matches;
+function calculateMatchScore(buyerInterests, sellerProducts) {
+  try {
+    const matchingProducts = sellerProducts.filter(product =>
+      buyerInterests.some(interest => 
+        interest.toLowerCase() === product.toLowerCase()
+      )
+    );
+    const matchPercentage = Math.round((matchingProducts.length / buyerInterests.length) * 100);
+    return Math.min(matchPercentage, 100);
+  } catch (error) {
+    console.error('Error calculating match score:', error);
+    return 0;
+  }
 }
 
-function calculateMatchScore(buyerInterests, seller) {
-  // Product matching
-  const sharedProducts = buyerInterests.filter(product =>
-    seller.products_offered.includes(product)
-  );
-  const productScore = (sharedProducts.length / Math.max(buyerInterests.length, 1)) * 0.5;
-
-  // Experience score (max 10 years considered optimal)
-  const experienceScore = Math.min(seller.years_experience / 10, 1) * 0.25;
-
-  // Performance score
-  const performanceScore = calculatePerformanceScore(seller.performance_metrics) * 0.25;
-
-  return {
-    productScore,
-    experienceScore,
-    performanceScore,
-    total: productScore + experienceScore + performanceScore,
-    sharedProducts
-  };
-}
-
-function calculatePerformanceScore(metrics) {
-  if (metrics.total_orders === 0) return 0;
-
-  const successRate = metrics.successful_orders / metrics.total_orders;
-  const responseScore = Math.max(0, 1 - (metrics.avg_response_time / 48)); // 48 hours baseline
-  
-  return (successRate * 0.6) + (responseScore * 0.4);
+// Helper function to parse array fields
+function parseArrayField(field) {
+  if (!field) return [];
+  if (Array.isArray(field)) return field;
+  try {
+    return JSON.parse(field);
+  } catch {
+    return [];
+  }
 }
 
 module.exports = findMatches;
