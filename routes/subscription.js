@@ -176,52 +176,21 @@ router.post('/create-checkout-session', async (req, res) => {
 
     const user = userResult[0];
 
-    // Get subscription price details
-    const priceDetails = await db.execute({
-      sqlText: `
-        SELECT * FROM TRADE.GWTRADE.SUBSCRIPTION_PRICES
-        WHERE PRICE_ID = ? AND USER_TYPE = ?`,
-      binds: [priceId, userType]
+    // Create Stripe customer
+    const stripeCustomer = await stripe.customers.create({
+      email: user.EMAIL,
+      metadata: {
+        userId: userId,
+        userType: userType
+      }
     });
-
-    if (!priceDetails || priceDetails.length === 0) {
-      return res.status(404).json({
-        code: 'PRICE_NOT_FOUND',
-        message: 'Subscription price not found'
-      });
-    }
-
-    const price = priceDetails[0];
-
-    // Create Stripe customer if not exists
-    let stripeCustomer;
-    if (user.STRIPE_CUSTOMER_ID) {
-      stripeCustomer = await stripe.customers.retrieve(user.STRIPE_CUSTOMER_ID);
-    } else {
-      stripeCustomer = await stripe.customers.create({
-        email: user.EMAIL,
-        metadata: {
-          userId: userId,
-          userType: userType
-        }
-      });
-
-      // Update user with Stripe customer ID
-      await db.execute({
-        sqlText: `
-          UPDATE TRADE.GWTRADE.USERS 
-          SET STRIPE_CUSTOMER_ID = ? 
-          WHERE USER_ID = ?`,
-        binds: [stripeCustomer.id, userId]
-      });
-    }
 
     // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       customer: stripeCustomer.id,
       payment_method_types: ['card'],
       line_items: [{
-        price: price.STRIPE_PRICE_ID,
+        price: priceId,
         quantity: 1,
       }],
       mode: 'subscription',
@@ -238,9 +207,9 @@ router.post('/create-checkout-session', async (req, res) => {
     await db.execute({
       sqlText: `
         INSERT INTO TRADE.GWTRADE.USER_SUBSCRIPTIONS
-        (USER_ID, STATUS, STRIPE_SESSION_ID, PRICE_ID, USER_TYPE)
-        VALUES (?, 'pending', ?, ?, ?)`,
-      binds: [userId, session.id, priceId, userType]
+        (USER_ID, STATUS, STRIPE_SESSION_ID, PRICE_ID, USER_TYPE, STRIPE_CUSTOMER_ID)
+        VALUES (?, 'pending', ?, ?, ?, ?)`,
+      binds: [userId, session.id, priceId, userType, stripeCustomer.id]
     });
 
     // Log the checkout session creation
