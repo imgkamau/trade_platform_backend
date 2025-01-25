@@ -39,6 +39,7 @@ const jwt = require('jsonwebtoken');  // Add this at the top with other imports
 const checkSubscription = require('./middleware/checkSubscription');
 const subscriptionRouter = require('./routes/subscription');
 const webhookRouter = require('./routes/webhook');
+const cleanupExpiredTokens = require('./jobs/tokenCleanup');
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -128,6 +129,22 @@ app.use('/api/activities', authMiddleware, checkSubscription, activitiesRouter);
 app.use('/api/buyers', authMiddleware, checkSubscription, buyersRouter);
 app.use('/api/chat', authMiddleware, checkSubscription, chatRouter);
 app.use('/api/subscription', authMiddleware, subscriptionRouter);
+
+// Add this near your other route definitions
+app.post('/api/internal/cleanup-tokens', async (req, res) => {
+  // Verify this is an internal request from Vercel cron
+  const authHeader = req.headers.authorization;
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const result = await cleanupExpiredTokens();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // **9. Root Route**
 app.get('/', (req, res) => {

@@ -14,6 +14,7 @@ const helmet = require('helmet');
 const nodemailer = require('nodemailer'); // Nodemailer module
 const cors = require('cors'); // CORS middleware
 const sendEmail = require('../config/nodemailer');
+const { generateTokens } = require('../services/authService');
 
 // Apply helmet middleware for security
 router.use(helmet());
@@ -39,6 +40,13 @@ const authLimiter = rateLimit({
   message: 'Too many requests from this IP, please try again after 15 minutes',
   standardHeaders: true,
   legacyHeaders: false,
+});
+
+// Add at the top with other rate limiters
+const refreshTokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Limit each IP to 20 refresh requests per windowMs
+  message: 'Too many token refresh attempts, please try again after 15 minutes'
 });
 
 // Apply rate limiting to sensitive routes
@@ -395,37 +403,57 @@ router.post(
         return sendErrorResponse(res, 400, 'Invalid credentials');
       }
 
-      const payload = {
-        user: {
-          id: user.USER_ID,
-          role: user.ROLE,
-        },
+      const tokens = generateTokens(user);
+
+      // Track device
+      const deviceId = req.headers['x-device-id'] || uuidv4();
+      const deviceInfo = {
+        name: req.headers['user-agent'],
+        type: req.headers['x-device-type'] || 'unknown'
       };
 
-      jwt.sign(
-        payload,
-        process.env.JWT_SECRET,
-        { expiresIn: '1h' },
-        (err, token) => {
-          if (err) {
-            logger.error('JWT Sign error:', err);
-            throw err;
-          }
+      await db.execute({
+        sqlText: `
+          MERGE INTO TRADE.GWTRADE.USER_DEVICES
+          USING (SELECT ? as DEVICE_ID) as source
+          ON USER_DEVICES.DEVICE_ID = source.DEVICE_ID
+          WHEN MATCHED THEN
+            UPDATE SET LAST_USED = CURRENT_TIMESTAMP()
+          WHEN NOT MATCHED THEN
+            INSERT (DEVICE_ID, USER_ID, DEVICE_NAME, DEVICE_TYPE)
+            VALUES (?, ?, ?, ?)
+        `,
+        binds: [deviceId, deviceId, user.USER_ID, deviceInfo.name, deviceInfo.type]
+      });
 
-          // Exclude sensitive information before sending the user object
-          const userResponse = {
-            id: user.USER_ID,
-            username: user.USERNAME,
-            email: user.EMAIL,
-            full_name: user.FULL_NAME,
-            role: user.ROLE,
-            isEmailVerified: user.IS_EMAIL_VERIFIED,
-            // Include other necessary fields, but exclude sensitive ones like PASSWORD_HASH
-          };
+      // Add device ID to refresh token record
+      await db.execute({
+        sqlText: `
+          UPDATE TRADE.GWTRADE.REFRESH_TOKENS
+          SET DEVICE_ID = ?
+          WHERE USER_ID = ? AND REFRESH_TOKEN = ?
+        `,
+        binds: [deviceId, user.USER_ID, tokens.refreshToken]
+      });
 
-          res.json({ token, user: userResponse });
+      // Set refresh token in HTTP-only cookie
+      res.cookie('refreshToken', tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+      });
+
+      res.json({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        deviceId,
+        user: {
+          id: user.USER_ID,
+          email: user.EMAIL,
+          userType: user.USER_TYPE
         }
-      );
+      });
     } catch (error) {
       logger.error('Login error:', error);
       const errorDetails = [{ msg: error.message }];
@@ -575,5 +603,118 @@ router.post(
     }
   }
 );
+
+// Apply to refresh token route
+router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
+  try {
+    const { refreshToken } = req.cookies;
+    
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Refresh token required' });
+    }
+
+    // Verify token exists in database and hasn't expired
+    const tokenResult = await db.execute({
+      sqlText: `
+        SELECT USER_ID FROM TRADE.GWTRADE.REFRESH_TOKENS 
+        WHERE REFRESH_TOKEN = ? 
+        AND EXPIRES_AT > CURRENT_TIMESTAMP()
+      `,
+      binds: [refreshToken]
+    });
+
+    if (!tokenResult || tokenResult.length === 0) {
+      return res.status(401).json({ message: 'Invalid refresh token' });
+    }
+
+    const decoded = await verifyRefreshToken(refreshToken);
+    
+    // Get user from database
+    const userResult = await db.execute({
+      sqlText: `SELECT * FROM TRADE.GWTRADE.USERS WHERE USER_ID = ?`,
+      binds: [decoded.id]
+    });
+
+    if (!userResult || userResult.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Generate new tokens
+    const tokens = generateTokens(userResult[0]);
+
+    // Update refresh token in database
+    await db.execute({
+      sqlText: `
+        UPDATE TRADE.GWTRADE.REFRESH_TOKENS
+        SET REFRESH_TOKEN = ?, EXPIRES_AT = DATEADD(day, 30, CURRENT_TIMESTAMP())
+        WHERE USER_ID = ? AND REFRESH_TOKEN = ?
+      `,
+      binds: [tokens.refreshToken, decoded.id, refreshToken]
+    });
+
+    // Set new refresh token in cookie
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    });
+
+    res.json({ accessToken: tokens.accessToken });
+  } catch (error) {
+    logger.error('Refresh token error:', error);
+    res.status(401).json({ message: 'Invalid refresh token' });
+  }
+});
+
+// Add endpoint to manage devices
+router.get('/devices', async (req, res) => {
+  try {
+    const devices = await db.execute({
+      sqlText: `
+        SELECT DEVICE_ID, DEVICE_NAME, DEVICE_TYPE, LAST_USED, IS_ACTIVE
+        FROM TRADE.GWTRADE.USER_DEVICES
+        WHERE USER_ID = ?
+        ORDER BY LAST_USED DESC
+      `,
+      binds: [req.user.id]
+    });
+    
+    res.json(devices);
+  } catch (error) {
+    logger.error('Error fetching devices:', error);
+    res.status(500).json({ message: 'Failed to fetch devices' });
+  }
+});
+
+// Add endpoint to revoke device access
+router.post('/devices/revoke', async (req, res) => {
+  try {
+    const { deviceId } = req.body;
+    
+    await db.execute({
+      sqlText: `
+        UPDATE TRADE.GWTRADE.USER_DEVICES
+        SET IS_ACTIVE = FALSE
+        WHERE DEVICE_ID = ? AND USER_ID = ?
+      `,
+      binds: [deviceId, req.user.id]
+    });
+
+    // Also revoke associated refresh tokens
+    await db.execute({
+      sqlText: `
+        DELETE FROM TRADE.GWTRADE.REFRESH_TOKENS
+        WHERE DEVICE_ID = ? AND USER_ID = ?
+      `,
+      binds: [deviceId, req.user.id]
+    });
+    
+    res.json({ message: 'Device access revoked successfully' });
+  } catch (error) {
+    logger.error('Error revoking device:', error);
+    res.status(500).json({ message: 'Failed to revoke device access' });
+  }
+});
 
 module.exports = router;

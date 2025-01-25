@@ -15,5 +15,11 @@
       "src": "/(.*)",
       "dest": "index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/internal/cleanup-tokens",
+      "schedule": "0 0 * * *"
+    }
   ]
 }
