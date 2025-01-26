@@ -65,6 +65,15 @@ const logTokenOperation = async (operation, token, userId) => {
   });
 };
 
+const verifyRefreshToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+  } catch (error) {
+    logger.error('Token verification failed:', error);
+    throw new Error('Invalid refresh token');
+  }
+};
+
 /**
  * @route   POST /auth/register
  * @desc    Register a new user and send verification email

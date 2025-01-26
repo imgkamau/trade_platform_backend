@@ -3,21 +3,14 @@ const jwt = require('jsonwebtoken');
 const generateTokens = (user, rememberMe = false) => {
   // Access token - short lived (15 minutes)
   const accessToken = jwt.sign(
-    { 
-      id: user.USER_ID,
-      role: user.USER_TYPE || user.ROLE  // Keep the fallback for role
-    },
+    { id: user.USER_ID, role: user.ROLE },
     process.env.JWT_SECRET,
-    { expiresIn: '15m' }
+    { expiresIn: '1h' }
   );
 
   // Refresh token - expiry based on rememberMe
   const refreshToken = jwt.sign(
-    { 
-      id: user.USER_ID,
-      role: user.USER_TYPE || user.ROLE,  // Keep the role fallback
-      type: 'refresh'
-    },
+    { id: user.USER_ID, role: user.ROLE, type: 'refresh' },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: rememberMe ? '30d' : '24h' }  // 30 days if rememberMe, 24h if not
   );
