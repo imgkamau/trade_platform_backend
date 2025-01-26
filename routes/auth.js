@@ -623,17 +623,15 @@ router.post(
   }
 );
 
-// Update refresh token route to handle mobile app
+// Update refresh token route
 router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
   try {
     const isMobileApp = req.headers['x-platform'] === 'mobile';
     let refreshToken;
 
     if (isMobileApp) {
-      // For mobile, get token from Authorization header
       refreshToken = req.headers.authorization?.split(' ')[1];
     } else {
-      // For web, get token from cookie
       refreshToken = req.cookies.refreshToken;
     }
     
@@ -641,21 +639,33 @@ router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Refresh token required' });
     }
 
-    // Verify token exists and hasn't expired
+    // First verify the token is valid
+    const decoded = await verifyRefreshToken(refreshToken);
+
+    // Then check if it exists in database and hasn't expired
     const tokenResult = await db.execute({
       sqlText: `
         SELECT USER_ID, REMEMBER_ME FROM TRADE.GWTRADE.REFRESH_TOKENS 
         WHERE REFRESH_TOKEN = ? 
         AND EXPIRES_AT > CURRENT_TIMESTAMP()
+        AND USER_ID = ?  -- Added user check
       `,
-      binds: [refreshToken]
+      binds: [refreshToken, decoded.id]
     });
 
     if (!tokenResult || tokenResult.length === 0) {
+      // Clean up old tokens for this user
+      await db.execute({
+        sqlText: `
+          DELETE FROM TRADE.GWTRADE.REFRESH_TOKENS
+          WHERE USER_ID = ?
+          AND (EXPIRES_AT <= CURRENT_TIMESTAMP() OR REMEMBER_ME = FALSE)
+        `,
+        binds: [decoded.id]
+      });
       return res.status(401).json({ message: 'Invalid refresh token' });
     }
 
-    const decoded = await verifyRefreshToken(refreshToken);
     const userResult = await db.execute({
       sqlText: `SELECT * FROM TRADE.GWTRADE.USERS WHERE USER_ID = ?`,
       binds: [decoded.id]

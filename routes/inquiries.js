@@ -4,11 +4,10 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Your database module
 const { v4: uuidv4 } = require('uuid');
-const authMiddleware = require('../middleware/auth'); // Authentication middleware
-const authorize = require('../middleware/authorize'); // Authorization middleware
+const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 
 // POST /api/inquiries - Create a product inquiry
-router.post('/', authMiddleware, authorize(['buyer']), async (req, res) => {
+router.post('/', verifyToken, verifyRole(['buyer']), async (req, res) => {
     const { productId, inquiry } = req.body;
     const buyerId = req.user.id;
 
@@ -29,7 +28,7 @@ router.post('/', authMiddleware, authorize(['buyer']), async (req, res) => {
 
         const sellerId = productResult[0].SELLER_ID;
 
-        // Insert the inquiry into a hypothetical INQUIRIES table
+        // Insert the inquiry
         const inquiryId = uuidv4();
         await db.execute({
             sqlText: `
@@ -39,7 +38,7 @@ router.post('/', authMiddleware, authorize(['buyer']), async (req, res) => {
             binds: [inquiryId, buyerId, sellerId, productId, inquiry],
         });
 
-        // Automatically create a conversation related to this inquiry
+        // Create a conversation
         const conversationId = uuidv4();
         await db.execute({
             sqlText: `

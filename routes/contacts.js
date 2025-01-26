@@ -4,11 +4,10 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Your database module
 const { v4: uuidv4 } = require('uuid');
-const authMiddleware = require('../middleware/auth'); // Authentication middleware
-const authorize = require('../middleware/authorize'); // Authorization middleware
+const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 
 // POST /api/contacts - Seller initiates contact with a buyer
-router.post('/', authMiddleware, authorize(['seller']), async (req, res) => {
+router.post('/', verifyToken, verifyRole(['seller']), async (req, res) => {
     const { buyerId, message, productId } = req.body;
     const sellerId = req.user.id;
 

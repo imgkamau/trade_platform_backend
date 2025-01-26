@@ -4,7 +4,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Snowflake database module
 const { v4: uuidv4 } = require('uuid');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken, verifyRole } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 const redis = require('../config/redis');
@@ -12,8 +12,11 @@ const redis = require('../config/redis');
 const CACHE_EXPIRATION = 3600; // 1 hour
 const CONVERSATIONS_LIMIT = 50; // Example limit for recent activities
 
+// Apply auth middleware to all routes
+router.use(verifyToken);
+
 // GET all orders with caching
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', verifyRole(['seller', 'buyer']), async (req, res) => {
   const userId = req.user.id;
   const role = req.user.role;
   const cacheKey = `orders_${role}_${userId}`;
@@ -84,8 +87,8 @@ router.get('/', authMiddleware, async (req, res) => {
 
     res.status(200).json(orders);
   } catch (error) {
-    console.error('Error fetching orders:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('Error fetching orders:', error);
+    res.status(500).json({ message: 'Failed to fetch orders' });
   }
 });
 
@@ -106,7 +109,7 @@ const clearOrderCache = async (buyerId, sellerIds) => {
 };
 
 // Place a new order (Buyers only)
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', verifyRole(['buyer']), async (req, res) => {
   const { items } = req.body; // items is an array of { productName, quantity }
   const buyerId = req.user.id;
   const role = req.user.role;

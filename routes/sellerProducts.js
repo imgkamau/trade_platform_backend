@@ -6,12 +6,7 @@ const db = require('../db');
 const { body, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
-
-// Authentication and Authorization middleware
-const authMiddleware = require('../middleware/auth'); // Authentication middleware
-const authorize = require('../middleware/authorize'); // Authorization middleware
-
-// Optional: Caching (if needed)
+const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 300 }); // Cache for 5 minutes
 
@@ -22,8 +17,8 @@ const cache = new NodeCache({ stdTTL: 300 }); // Cache for 5 minutes
  */
 router.post(
   '/',
-  authMiddleware,
-  authorize(['seller']),
+  verifyToken,
+  verifyRole(['seller']),
   [
     body('productId').notEmpty().withMessage('Product ID is required'),
     body('price').isFloat({ gt: 0 }).withMessage('Price must be a positive number'),
@@ -91,10 +86,10 @@ router.post(
 
 /**
  * @route   GET /api/seller-products
- * @desc    Get all product offerings of the authenticated seller
- * @access  Public (Previously Private)
+ * @desc    Get all product offerings
+ * @access  Public
  */
-router.get('/', async (req, res) => { // Removed authMiddleware and authorize
+router.get('/', async (req, res) => {
   logger.info('Fetching all seller products');
 
   try {
@@ -153,8 +148,8 @@ router.get('/', async (req, res) => { // Removed authMiddleware and authorize
  */
 router.put(
   '/:sellerProductId',
-  authMiddleware,
-  authorize(['seller']),
+  verifyToken,
+  verifyRole(['seller']),
   [
     body('price').optional().isFloat({ gt: 0 }).withMessage('Price must be a positive number'),
     body('stock').optional().isInt({ gt: -1 }).withMessage('Stock must be a non-negative integer'),
@@ -223,39 +218,44 @@ router.put(
  * @desc    Delete a seller's product offering
  * @access  Private (Sellers only)
  */
-router.delete('/:sellerProductId', authMiddleware, authorize(['seller']), async (req, res) => {
-  const { sellerProductId } = req.params;
-  const sellerId = req.user.id;
+router.delete(
+  '/:sellerProductId', 
+  verifyToken, 
+  verifyRole(['seller']), 
+  async (req, res) => {
+    const { sellerProductId } = req.params;
+    const sellerId = req.user.id;
 
-  try {
-    // Verify the seller owns this offering
-    const offeringResult = await db.execute({
-      sqlText: `
-        SELECT * FROM trade.gwtrade.SELLER_PRODUCTS
-        WHERE SELLER_PRODUCT_ID = ? AND SELLER_ID = ?
-      `,
-      binds: [sellerProductId, sellerId],
-    });
+    try {
+      // Verify the seller owns this offering
+      const offeringResult = await db.execute({
+        sqlText: `
+          SELECT * FROM trade.gwtrade.SELLER_PRODUCTS
+          WHERE SELLER_PRODUCT_ID = ? AND SELLER_ID = ?
+        `,
+        binds: [sellerProductId, sellerId],
+      });
 
-    if (offeringResult.length === 0) {
-      return res.status(404).json({ message: 'Product offering not found' });
+      if (offeringResult.length === 0) {
+        return res.status(404).json({ message: 'Product offering not found' });
+      }
+
+      // Delete the offering
+      await db.execute({
+        sqlText: `
+          DELETE FROM trade.gwtrade.SELLER_PRODUCTS
+          WHERE SELLER_PRODUCT_ID = ?
+        `,
+        binds: [sellerProductId],
+      });
+
+      logger.info(`Seller ${sellerId} deleted product offering ${sellerProductId}`);
+      res.json({ message: 'Product offering deleted successfully' });
+    } catch (error) {
+      logger.error('Error deleting product offering:', error);
+      res.status(500).json({ message: 'Server error', error: error.message });
     }
-
-    // Delete the offering
-    await db.execute({
-      sqlText: `
-        DELETE FROM trade.gwtrade.SELLER_PRODUCTS
-        WHERE SELLER_PRODUCT_ID = ?
-      `,
-      binds: [sellerProductId],
-    });
-
-    logger.info(`Seller ${sellerId} deleted product offering ${sellerProductId}`);
-    res.json({ message: 'Product offering deleted successfully' });
-  } catch (error) {
-    logger.error('Error deleting product offering:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
   }
-});
+);
 
 module.exports = router;

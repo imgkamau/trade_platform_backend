@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const db = require('../db');
 const logger = require('../utils/logger');
 const redis = require('../config/redis');
@@ -19,7 +19,7 @@ const clearActivityCache = async (userId) => {
   }
 };
 
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', verifyToken, async (req, res) => {
   const userId = req.user.id;
   const cacheKey = `activities_${userId}`;
 

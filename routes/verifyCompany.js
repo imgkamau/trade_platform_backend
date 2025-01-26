@@ -10,7 +10,7 @@ const os = require('os');
 const AWS = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 
 // Load environment variables
 require('dotenv').config();
@@ -54,10 +54,6 @@ const upload = multer({
   },
 });
 
-// Authentication Middleware
-// Assuming you have a middleware 'authMiddleware' that verifies JWT tokens and sets req.user
-// If not, you can use the authenticateToken function from the previous implementation
-
 /**
  * @route   POST /verify-company
  * @desc    Submit company verification data
@@ -69,9 +65,9 @@ router.post(
     logger.info('Received request at /verify-company');
     next();
   },
-  authMiddleware,
+  verifyToken,
   (req, res, next) => {
-    logger.info('Passed authMiddleware');
+    logger.info('Passed authentication');
     next();
   },
   function (req, res, next) {

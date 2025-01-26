@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const userModel = require('../models/userModel');
 const findMatches = require('../utils/matchmaking');
 
-router.get('/matchmaking', authMiddleware, async (req, res) => {
+router.get('/matchmaking', verifyToken, async (req, res) => {
   try {
     const result = await findMatches(req.user.id, db);
     

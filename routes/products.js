@@ -8,10 +8,7 @@ const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid'); // Import the uuid module
 const redis = require('../config/redis');
 const CACHE_EXPIRATION = 3600; // 1 hour in seconds
-
-// Authentication and Authorization middleware
-const authMiddleware = require('../middleware/auth'); // Authentication middleware
-const authorize = require('../middleware/authorize'); // Authorization middleware
+const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 
 // Optional: Caching (if needed)
 const NodeCache = require('node-cache');
@@ -92,7 +89,7 @@ const clearProductCache = async () => {
 };
 
 // GET: Retrieve products for the authenticated seller
-router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) => {
+router.get('/seller', verifyToken, verifyRole(['seller']), async (req, res) => {
   logger.info('Entered GET /api/products/seller route');
 
   try {
@@ -130,8 +127,8 @@ router.get('/seller', authMiddleware, authorize(['seller']), async (req, res) =>
 // POST /api/products - Create a new product (Sellers only)
 router.post(
   '/',
-  authMiddleware,
-  authorize(['seller']),
+  verifyToken,
+  verifyRole(['seller']),
   [
     // Validation middleware (optional but recommended)
     body('NAME').notEmpty().withMessage('Product name is required'),
@@ -208,7 +205,7 @@ router.post(
 );
 
 // Update a product (Sellers only)
-router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res) => {
+router.put('/:productId', verifyToken, verifyRole(['seller']), async (req, res) => {
   const { productId } = req.params;
   const { name, description, category, price, stock } = req.body;
   const sellerId = req.user.id;
@@ -249,7 +246,7 @@ router.put('/:productId', authMiddleware, authorize(['seller']), async (req, res
 });
 
 // Delete a product (Exporters only)
-router.delete('/:productId', authMiddleware, authorize(['exporter']), async (req, res) => {
+router.delete('/:productId', verifyToken, verifyRole(['seller']), async (req, res) => {
   const { productId } = req.params;
   const sellerId = req.user.id;
 

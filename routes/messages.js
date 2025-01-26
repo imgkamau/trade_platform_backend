@@ -4,11 +4,10 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Your database module
 const { v4: uuidv4 } = require('uuid'); // For generating UUIDs
-const authMiddleware = require('../middleware/auth'); // Authentication middleware
-const authorize = require('../middleware/authorize'); // Authorization middleware
+const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 
 // GET /api/messages/:conversationId - Get all messages in a conversation
-router.get('/:conversationId', authMiddleware, authorize(['buyer', 'seller']), async (req, res) => {
+router.get('/:conversationId', verifyToken, verifyRole(['buyer', 'seller']), async (req, res) => {
     const { conversationId } = req.params;
     const userId = req.user.id;
 
@@ -50,7 +49,7 @@ router.get('/:conversationId', authMiddleware, authorize(['buyer', 'seller']), a
 });
 
 // POST /api/messages - Send a new message
-router.post('/', authMiddleware, authorize(['buyer', 'seller']), async (req, res) => {
+router.post('/', verifyToken, verifyRole(['buyer', 'seller']), async (req, res) => {
     const { recipient_id, content, conversation_id } = req.body;
     const senderId = req.user.id;
 

@@ -5,8 +5,7 @@ const router = express.Router();
 const cors = require('cors');
 const multer = require('multer');
 const db = require('../db');
-const authMiddleware = require('../middleware/auth');
-const authorize = require('../middleware/authorize');
+const { verifyToken, verifyRole } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
 const os = require('os');
 const path = require('path');
@@ -78,34 +77,23 @@ const upload = multer({
  */
 router.post(
   '/upload',
+  verifyToken,
+  verifyRole(['seller', 'buyer']),
   (req, res, next) => {
-    logger.info('Received request at /api/documents/upload');
-    next();
-  },
-  authMiddleware,
-  (req, res, next) => {
-    logger.info('Passed authMiddleware');
-    next();
-  },
-  authorize(['seller', 'buyer']),
-  (req, res, next) => {
-    logger.info('Passed authorize middleware');
-    next();
-  },
-  function (req, res, next) {
     logger.info('Starting file upload');
     upload.single('document')(req, res, function (err) {
       if (err) {
         logger.error('Error during file upload:', err);
-        return res
-          .status(400)
-          .json({ message: 'File upload error', error: err.message });
+        return res.status(400).json({ 
+          message: 'File upload error', 
+          error: err.message 
+        });
       }
       logger.info('File upload successful');
       next();
     });
   },
-  async function (req, res) {
+  async (req, res) => {
     logger.info('Entered route handler after file upload');
     const { shipmentId, documentType } = req.body;
     const document = req.file;
@@ -244,11 +232,11 @@ router.post(
   }
 );
 
-// Apply authentication and authorization middleware to subsequent routes
-router.use(authMiddleware);
-router.use(authorize(['seller', 'buyer']));
+// Apply authentication middleware to all subsequent routes
+router.use(verifyToken);
+router.use(verifyRole(['seller', 'buyer']));
 
-// GET: Fetch documents (Modified to return documents for the authenticated user)
+// GET: Fetch documents
 router.get('/', async (req, res) => {
   logger.info('Entered GET /api/documents route');
   const userId = req.user.id; // Get the authenticated user's ID
@@ -284,7 +272,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET: Download a specific document (Modified to check document ownership)
+// GET: Download a specific document
 router.get('/:documentId', async (req, res) => {
   const { documentId } = req.params;
   const userId = req.user.id; // Get the authenticated user's ID

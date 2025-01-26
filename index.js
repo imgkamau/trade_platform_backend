@@ -16,7 +16,6 @@ const refreshTokenRoute = require('./routes/refreshToken');
 const authRouter = require('./routes/auth');
 const productsRouter = require('./routes/products');
 const ordersRouter = require('./routes/orders');
-const authMiddleware = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 const regulationsRouter = require('./routes/regulations');
 const logisticsRouter = require('./routes/logistics');
@@ -40,6 +39,7 @@ const checkSubscription = require('./middleware/checkSubscription');
 const subscriptionRouter = require('./routes/subscription');
 const webhookRouter = require('./routes/webhook');
 const cleanupExpiredTokens = require('./jobs/tokenCleanup');
+const { verifyToken } = require('./middleware/auth');
 
 //const { connectToSnowflake } = require('./db'); // Import connectToSnowflake
 // Conditionally import connectToSnowflake
@@ -113,22 +113,22 @@ app.use('/test', testRouter);
 app.use('/api', euRequirementsRouter);
 app.use('/api', sellersRouter);
 // Protected routes (with auth and subscription check)
-app.use('/api/checklists', authMiddleware, checkSubscription, checklistsRouter);
-app.use('/api/quotes', authMiddleware, checkSubscription, quotesRoutes);
-app.use('/api/regulations', authMiddleware, checkSubscription, regulationsRouter);
-app.use('/api/logistics', authMiddleware, checkSubscription, logisticsRouter);
-app.use('/api/documents', authMiddleware, checkSubscription, documentsRouter);
-app.use('/api/shipping', authMiddleware, checkSubscription, shippingRouter);
-app.use('/api/orders', authMiddleware, checkSubscription, ordersRouter);
-app.use('/api/messages', authMiddleware, checkSubscription, messagesRouter);
-app.use('/api/analytics', authMiddleware, checkSubscription, analyticsRouter);
-app.use('/api/inquiries', authMiddleware, checkSubscription, inquiriesRouter);
-app.use('/api/contacts', authMiddleware, checkSubscription, contactsRouter);
-app.use('/api/seller-products', authMiddleware, checkSubscription, sellerProductsRouter);
-app.use('/api/activities', authMiddleware, checkSubscription, activitiesRouter);
-app.use('/api/buyers', authMiddleware, checkSubscription, buyersRouter);
-app.use('/api/chat', authMiddleware, checkSubscription, chatRouter);
-app.use('/api/subscription', authMiddleware, subscriptionRouter);
+app.use('/api/checklists', verifyToken, checkSubscription, checklistsRouter);
+app.use('/api/quotes', verifyToken, checkSubscription, quotesRoutes);
+app.use('/api/regulations', verifyToken, checkSubscription, regulationsRouter);
+app.use('/api/logistics', verifyToken, checkSubscription, logisticsRouter);
+app.use('/api/documents', verifyToken, checkSubscription, documentsRouter);
+app.use('/api/shipping', verifyToken, checkSubscription, shippingRouter);
+app.use('/api/orders', verifyToken, checkSubscription, ordersRouter);
+app.use('/api/messages', verifyToken, checkSubscription, messagesRouter);
+app.use('/api/analytics', verifyToken, checkSubscription, analyticsRouter);
+app.use('/api/inquiries', verifyToken, checkSubscription, inquiriesRouter);
+app.use('/api/contacts', verifyToken, checkSubscription, contactsRouter);
+app.use('/api/seller-products', verifyToken, checkSubscription, sellerProductsRouter);
+app.use('/api/activities', verifyToken, checkSubscription, activitiesRouter);
+app.use('/api/buyers', verifyToken, checkSubscription, buyersRouter);
+app.use('/api/chat', verifyToken, checkSubscription, chatRouter);
+app.use('/api/subscription', verifyToken, subscriptionRouter);
 
 // Add this near your other route definitions
 app.post('/api/internal/cleanup-tokens', async (req, res) => {

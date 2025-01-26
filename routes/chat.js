@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const db = require('../db');
 
 // Get chat history between two users
-router.get('/history/:recipientId', authMiddleware, async (req, res) => {
+router.get('/history/:recipientId', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const { recipientId } = req.params;
@@ -36,7 +36,7 @@ router.get('/history/:recipientId', authMiddleware, async (req, res) => {
 });
 
 // Get user's conversations
-router.get('/conversations', authMiddleware, async (req, res) => {
+router.get('/conversations', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
     

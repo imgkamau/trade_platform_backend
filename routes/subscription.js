@@ -1,17 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
-// All routes use auth middleware
-router.use(authMiddleware);
+// Apply auth middleware to all routes
+router.use(verifyToken);
 
 // Create trial subscription
 router.post('/create-trial-session', async (req, res) => {
   try {
-    const userId = req.user.id || req.user.user?.id;
+    const userId = req.user.id;
     const { trialDays = 7, userType, priceId } = req.body;
 
     logger.debug('Creating trial subscription for user:', userId);
@@ -117,7 +117,7 @@ router.post('/create-trial-session', async (req, res) => {
 // Get subscription status
 router.get('/status', async (req, res) => {
   try {
-    const userId = req.user.id || req.user.user?.id;
+    const userId = req.user.id;
     
     const subscriptions = await db.execute({
       sqlText: `
@@ -154,7 +154,7 @@ router.get('/status', async (req, res) => {
 // Create checkout session for subscription
 router.post('/create-checkout-session', async (req, res) => {
   try {
-    const userId = req.user.id || req.user.user?.id;
+    const userId = req.user.id;
     const { userType, priceId } = req.body;
 
     // Get user details for the checkout session
@@ -264,10 +264,10 @@ router.post('/verify-session', async (req, res) => {
   }
 });
 
-// Add this new route
+// Debug status endpoint
 router.get('/debug-status', async (req, res) => {
   try {
-    const userId = req.user.id || req.user.user?.id;
+    const userId = req.user.id;
     
     const allSubscriptions = await db.execute({
       sqlText: `
@@ -290,7 +290,7 @@ router.get('/debug-status', async (req, res) => {
   }
 });
 
-// Add new route for session recovery
+// Session recovery endpoint
 router.get('/recover-session/:sessionId', async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.retrieve(req.params.sessionId);

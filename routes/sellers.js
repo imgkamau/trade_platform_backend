@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken, verifyRole } = require('../middleware/auth');
 
 // Update seller profile
-router.put('/sellers/profile', authMiddleware, async (req, res) => {
+router.put('/sellers/profile', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
   const { 
     PRODUCTS_OFFERED, 
@@ -94,7 +94,7 @@ router.put('/sellers/profile', authMiddleware, async (req, res) => {
 });
 
 // Get seller profile
-router.get('/sellers/profile', authMiddleware, async (req, res) => {
+router.get('/sellers/profile', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
 
   try {

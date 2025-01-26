@@ -4,11 +4,10 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { v4: uuidv4 } = require('uuid'); // For generating unique IDs
-const authMiddleware = require('../middleware/auth');
+const { verifyToken, verifyRole } = require('../middleware/auth'); // Only import new auth middleware
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
-const { sendQuoteRequestEmail } = require('../utils/emailService'); // Import the SendGrid function
-const { sendQuoteResponseEmail } = require('../utils/emailService'); // Import the email function
+const { sendQuoteRequestEmail, sendQuoteResponseEmail } = require('../utils/emailService'); // Import the SendGrid function
 const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 3600; // 1 hour
@@ -30,7 +29,7 @@ const clearQuoteCache = async (buyerId, sellerId, quoteId) => {
 };
 
 // POST /api/quotes - Request a new quote
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', verifyToken, verifyRole(['buyer']), async (req, res) => {
   try {
     const { productId, quantity } = req.body;
     const buyerId = req.user.id;
@@ -131,7 +130,7 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // POST /api/quotes/:id/respond - Respond to a quote request 
-router.post('/:id/respond', authMiddleware, async (req, res) => {
+router.post('/:id/respond', verifyToken, verifyRole(['seller']), async (req, res) => {
   try {
     const { id } = req.params;
     const { price, notes } = req.body;
@@ -181,7 +180,7 @@ router.post('/:id/respond', authMiddleware, async (req, res) => {
 });
 
 // GET /api/quotes/:id - Get a specific quote
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', verifyToken, verifyRole(['seller', 'buyer']), async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -242,10 +241,8 @@ router.get('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-
-
 // **GET /api/quotes - Get all quotes for a buyer or seller**
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', verifyToken, verifyRole(['seller', 'buyer']), async (req, res) => {
   try {
     const userId = req.user.id;
     const role = req.user.role;

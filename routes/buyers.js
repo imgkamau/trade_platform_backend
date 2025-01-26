@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const authMiddleware = require('../middleware/auth');
+const { verifyToken, verifyRole } = require('../middleware/auth');
 const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 3600; // 1 hour
@@ -18,14 +18,9 @@ const clearBuyerCache = async (userId) => {
 };
 
 // GET: Retrieve the buyer's profile
-router.get('/profile', authMiddleware, async (req, res) => {
+router.get('/profile', verifyToken, verifyRole(['buyer']), async (req, res) => {
   const buyerId = req.user.id;
   const cacheKey = `buyer_profile_${buyerId}`;
-
-  // Ensure the user is a buyer
-  if (req.user.role !== 'buyer') {
-    return res.status(403).json({ message: 'Access denied. Only buyers can access their profile.' });
-  }
 
   try {
     // Try to get from cache first
@@ -82,14 +77,8 @@ router.get('/profile', authMiddleware, async (req, res) => {
 });
 
 // PUT: Update buyer's profile
-router.put('/profile', authMiddleware, async (req, res) => {
+router.put('/profile', verifyToken, verifyRole(['buyer']), async (req, res) => {
   const buyerId = req.user.id;
-
-  // Ensure the user is a buyer
-  if (req.user.role !== 'buyer') {
-    return res.status(403).json({ message: 'Access denied. Only buyers can update their profile.' });
-  }
-
   const { productInterests, location } = req.body;
 
   if (!productInterests || !Array.isArray(productInterests)) {
@@ -138,13 +127,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
 });
 
 // POST: Create initial buyer profile
-router.post('/profile', authMiddleware, async (req, res) => {
+router.post('/profile', verifyToken, verifyRole(['buyer']), async (req, res) => {
   const buyerId = req.user.id;
-
-  // Ensure the user is a buyer
-  if (req.user.role !== 'buyer') {
-    return res.status(403).json({ message: 'Access denied. Only buyers can create profiles.' });
-  }
 
   try {
     // Check if profile already exists

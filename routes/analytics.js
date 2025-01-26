@@ -3,8 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Snowflake database module
-const authMiddleware = require('../middleware/auth'); // Authentication middleware
-const authorize = require('../middleware/authorize'); // Authorization middleware
+const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 1800; // 30 minutes for analytics data
@@ -22,7 +21,7 @@ const clearSellerAnalyticsCache = async (sellerId) => {
 };
 
 // Sales Overview Endpoint with caching
-router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req, res) => {
+router.get('/sales-overview', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
   const cacheKey = `sales_overview_${sellerId}`;
   console.log(`Processing sales-overview for Seller ID: ${sellerId}`);
@@ -124,7 +123,7 @@ router.get('/sales-overview', authMiddleware, authorize(['seller']), async (req,
 });
 
 // Product Performance Endpoint with caching
-router.get('/product-performance', authMiddleware, authorize(['seller']), async (req, res) => {
+router.get('/product-performance', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
   const cacheKey = `product_performance_${sellerId}`;
   console.log(`Processing product-performance for Seller ID: ${sellerId}`);
@@ -197,7 +196,7 @@ router.get('/product-performance', authMiddleware, authorize(['seller']), async 
 });
 
 // Time-Based Analysis Endpoint with caching
-router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async (req, res) => {
+router.get('/time-based-analysis', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
   const cacheKey = `time_analysis_${sellerId}`;
   console.log(`Processing time-based-analysis for Seller ID: ${sellerId}`);
@@ -265,7 +264,7 @@ router.get('/time-based-analysis', authMiddleware, authorize(['seller']), async 
   }
 });
 
-// Clear analytics cache when new order is placed (you'll need to call this from your orders route)
+// Clear analytics cache when new order is placed
 const clearAnalyticsCache = async (sellerId) => {
   try {
     await clearSellerAnalyticsCache(sellerId);
@@ -275,5 +274,4 @@ const clearAnalyticsCache = async (sellerId) => {
 };
 
 module.exports = router;
-// If you need clearAnalyticsCache elsewhere, attach it to the router
 router.clearAnalyticsCache = clearAnalyticsCache;

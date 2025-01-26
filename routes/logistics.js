@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const authMiddleware = require('../middleware/auth');
-const authorize = require('../middleware/authorize');
+const { verifyToken, verifyRole } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
 const redis = require('../config/redis');
 
@@ -19,7 +18,7 @@ const clearShipmentCache = async (trackingNumber) => {
 };
 
 // POST: Create a new shipment
-router.post('/shipments', authMiddleware, authorize(['seller']), async (req, res) => {
+router.post('/shipments', verifyToken, verifyRole(['seller']), async (req, res) => {
   const { buyer_id, status, tracking_number } = req.body;
   const seller_id = req.user.id;
 
@@ -41,7 +40,7 @@ router.post('/shipments', authMiddleware, authorize(['seller']), async (req, res
 });
 
 // GET: Fetch all shipments for a seller
-router.get('/shipments', authMiddleware, authorize(['seller']), async (req, res) => {
+router.get('/shipments', verifyToken, verifyRole(['seller']), async (req, res) => {
   const seller_id = req.user.id;
   const cacheKey = `shipments_seller_${seller_id}`;
 
@@ -70,7 +69,7 @@ router.get('/shipments', authMiddleware, authorize(['seller']), async (req, res)
 });
 
 // PUT: Update shipment status
-router.put('/shipments/:id', async (req, res) => {
+router.put('/shipments/:id', verifyToken, verifyRole(['seller']), async (req, res) => {
   const shipmentId = req.params.id;
   const { status } = req.body;
 
