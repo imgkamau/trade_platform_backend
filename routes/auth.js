@@ -176,7 +176,6 @@ router.post(
           sqlText: checkUsernameSql,
           binds: [username],
         });
-        console.log('Username check result:', existingUsernameResult);
 
         // Check for username and email uniqueness
         let validationErrors = [];
@@ -417,14 +416,19 @@ router.post(
       const insertTokenSql = `
         INSERT INTO TRADE.GWTRADE.REFRESH_TOKENS 
         (USER_ID, REFRESH_TOKEN, EXPIRES_AT, REMEMBER_ME)
-        VALUES (?, ?, DATEADD(day, ?, CURRENT_TIMESTAMP()), ?)
+        VALUES (
+          ?, 
+          ?, 
+          DATEADD(day, ?, CURRENT_TIMESTAMP()), 
+          ?
+        )
       `;
       
       const tokenBinds = [
         user.USER_ID,
         refreshToken,
         rememberMe ? 30 : 1,
-        rememberMe
+        rememberMe ? true : false  // Ensure boolean value
       ];
 
       console.log('Storing refresh token:', {
