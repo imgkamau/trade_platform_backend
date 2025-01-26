@@ -377,13 +377,19 @@ router.post(
   [
     body('username').notEmpty().withMessage('Username is required').trim(),
     body('password').notEmpty().withMessage('Password is required'),
-    body('rememberMe').optional().isBoolean(),  // Add rememberMe field
   ],
   async (req, res) => {
     try {
-      const { username, password, rememberMe = false } = req.body;
+      // For mobile apps, default rememberMe to true
+      const isMobileApp = req.headers['x-platform'] === 'mobile';
+      const { username, password, rememberMe = isMobileApp } = req.body;
       
-      console.log('Login attempt:', { username, hasPassword: !!password, rememberMe });
+      console.log('Login attempt:', { 
+        username, 
+        hasPassword: !!password, 
+        rememberMe,
+        platform: req.headers['x-platform'] || 'web'
+      });
 
       // Fetch user from Snowflake
       const loginSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
@@ -427,8 +433,8 @@ router.post(
       const tokenBinds = [
         user.USER_ID,
         refreshToken,
-        rememberMe ? 30 : 1,
-        rememberMe ? true : false  // Ensure boolean value
+        rememberMe ? 30 : 1,  // 30 days for mobile/remember me, 1 day otherwise
+        rememberMe
       ];
 
       console.log('Storing refresh token:', {
