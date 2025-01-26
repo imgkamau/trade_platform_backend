@@ -369,6 +369,7 @@ router.post(
   [
     body('username').notEmpty().withMessage('Username is required').trim(),
     body('password').notEmpty().withMessage('Password is required'),
+    body('rememberMe').optional().isBoolean(),  // Add rememberMe field
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -376,7 +377,7 @@ router.post(
       return sendErrorResponse(res, 400, 'Validation failed', errors.array());
     }
 
-    const { username, password } = req.body;
+    const { username, password, rememberMe } = req.body;
 
     try {
       // Fetch user from Snowflake
@@ -403,55 +404,39 @@ router.post(
         return sendErrorResponse(res, 400, 'Invalid credentials');
       }
 
-      const tokens = generateTokens(user);
+      // Generate tokens with remember me option
+      const tokens = generateTokens(user, rememberMe);
 
-      // Track device
-      const deviceId = req.headers['x-device-id'] || uuidv4();
-      const deviceInfo = {
-        name: req.headers['user-agent'],
-        type: req.headers['x-device-type'] || 'unknown'
-      };
+      // For mobile app, send tokens in response body
+      const isMobileApp = req.headers['x-platform'] === 'mobile';
+      if (isMobileApp) {
+        return res.json({
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          user: {
+            id: user.USER_ID,
+            email: user.EMAIL,
+            role: user.ROLE,
+            username: user.USERNAME
+          }
+        });
+      }
 
-      await db.execute({
-        sqlText: `
-          MERGE INTO TRADE.GWTRADE.USER_DEVICES
-          USING (SELECT ? as DEVICE_ID) as source
-          ON USER_DEVICES.DEVICE_ID = source.DEVICE_ID
-          WHEN MATCHED THEN
-            UPDATE SET LAST_USED = CURRENT_TIMESTAMP()
-          WHEN NOT MATCHED THEN
-            INSERT (DEVICE_ID, USER_ID, DEVICE_NAME, DEVICE_TYPE)
-            VALUES (?, ?, ?, ?)
-        `,
-        binds: [deviceId, deviceId, user.USER_ID, deviceInfo.name, deviceInfo.type]
-      });
-
-      // Add device ID to refresh token record
-      await db.execute({
-        sqlText: `
-          UPDATE TRADE.GWTRADE.REFRESH_TOKENS
-          SET DEVICE_ID = ?
-          WHERE USER_ID = ? AND REFRESH_TOKEN = ?
-        `,
-        binds: [deviceId, user.USER_ID, tokens.refreshToken]
-      });
-
-      // Set refresh token in HTTP-only cookie
+      // For web app, set refresh token in cookie
       res.cookie('refreshToken', tokens.refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+        maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000
       });
 
       res.json({
         accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        deviceId,
         user: {
           id: user.USER_ID,
           email: user.EMAIL,
-          userType: user.USER_TYPE
+          role: user.ROLE,
+          username: user.USERNAME
         }
       });
     } catch (error) {
@@ -604,19 +589,28 @@ router.post(
   }
 );
 
-// Apply to refresh token route
+// Update refresh token route to handle mobile app
 router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
   try {
-    const { refreshToken } = req.cookies;
+    const isMobileApp = req.headers['x-platform'] === 'mobile';
+    let refreshToken;
+
+    if (isMobileApp) {
+      // For mobile, get token from Authorization header
+      refreshToken = req.headers.authorization?.split(' ')[1];
+    } else {
+      // For web, get token from cookie
+      refreshToken = req.cookies.refreshToken;
+    }
     
     if (!refreshToken) {
       return res.status(401).json({ message: 'Refresh token required' });
     }
 
-    // Verify token exists in database and hasn't expired
+    // Verify token exists and hasn't expired
     const tokenResult = await db.execute({
       sqlText: `
-        SELECT USER_ID FROM TRADE.GWTRADE.REFRESH_TOKENS 
+        SELECT USER_ID, REMEMBER_ME FROM TRADE.GWTRADE.REFRESH_TOKENS 
         WHERE REFRESH_TOKEN = ? 
         AND EXPIRES_AT > CURRENT_TIMESTAMP()
       `,
@@ -628,8 +622,6 @@ router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
     }
 
     const decoded = await verifyRefreshToken(refreshToken);
-    
-    // Get user from database
     const userResult = await db.execute({
       sqlText: `SELECT * FROM TRADE.GWTRADE.USERS WHERE USER_ID = ?`,
       binds: [decoded.id]
@@ -639,25 +631,38 @@ router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Generate new tokens
-    const tokens = generateTokens(userResult[0]);
+    // Generate new tokens preserving remember me preference
+    const tokens = generateTokens(userResult[0], tokenResult[0].REMEMBER_ME);
 
     // Update refresh token in database
     await db.execute({
       sqlText: `
         UPDATE TRADE.GWTRADE.REFRESH_TOKENS
-        SET REFRESH_TOKEN = ?, EXPIRES_AT = DATEADD(day, 30, CURRENT_TIMESTAMP())
+        SET REFRESH_TOKEN = ?, 
+            EXPIRES_AT = DATEADD(day, ?, CURRENT_TIMESTAMP())
         WHERE USER_ID = ? AND REFRESH_TOKEN = ?
       `,
-      binds: [tokens.refreshToken, decoded.id, refreshToken]
+      binds: [
+        tokens.refreshToken, 
+        tokenResult[0].REMEMBER_ME ? 30 : 1, 
+        decoded.id, 
+        refreshToken
+      ]
     });
 
-    // Set new refresh token in cookie
+    if (isMobileApp) {
+      return res.json({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken
+      });
+    }
+
+    // Set new refresh token in cookie for web app
     res.cookie('refreshToken', tokens.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+      maxAge: tokenResult[0].REMEMBER_ME ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000
     });
 
     res.json({ accessToken: tokens.accessToken });

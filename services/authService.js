@@ -1,24 +1,25 @@
 const jwt = require('jsonwebtoken');
 
-const generateTokens = (user) => {
+const generateTokens = (user, rememberMe = false) => {
   // Access token - short lived (15 minutes)
   const accessToken = jwt.sign(
     { 
       id: user.USER_ID,
-      role: user.USER_TYPE || user.ROLE  // Add fallback for role
+      role: user.USER_TYPE || user.ROLE  // Keep the fallback for role
     },
     process.env.JWT_SECRET,
     { expiresIn: '15m' }
   );
 
-  // Refresh token - long lived (30 days)
+  // Refresh token - expiry based on rememberMe
   const refreshToken = jwt.sign(
     { 
       id: user.USER_ID,
-      role: user.USER_TYPE || user.ROLE  // Add role to refresh token too
+      role: user.USER_TYPE || user.ROLE,  // Keep the role fallback
+      type: 'refresh'
     },
     process.env.JWT_REFRESH_SECRET,
-    { expiresIn: '30d' }
+    { expiresIn: rememberMe ? '30d' : '24h' }  // 30 days if rememberMe, 24h if not
   );
 
   return { accessToken, refreshToken };
@@ -34,5 +35,6 @@ const verifyRefreshToken = async (token) => {
 };
 
 module.exports = {
-  generateTokens
+  generateTokens,
+  verifyRefreshToken  // Export this function too
 }; 
