@@ -381,17 +381,14 @@ router.post(
     body('rememberMe').optional().isBoolean(),  // Add rememberMe field
   ],
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return sendErrorResponse(res, 400, 'Validation failed', errors.array());
-    }
-
-    const { username, password, rememberMe } = req.body;
-
     try {
+      const { username, password, rememberMe = false } = req.body;
+      
+      console.log('Login attempt:', { username, hasPassword: !!password, rememberMe });
+
       // Fetch user from Snowflake
       const loginSql = 'SELECT * FROM trade.gwtrade.USERS WHERE USERNAME = ?';
-      logger.info('Executing SQL:', loginSql);
+      console.log('Executing SQL:', loginSql);
       const userResult = await db.execute({
         sqlText: loginSql,
         binds: [username],
@@ -402,49 +399,67 @@ router.post(
       }
 
       const user = userResult[0];
-
-      // Check if email is verified
-      if (!user.IS_EMAIL_VERIFIED) {
-        return sendErrorResponse(res, 400, 'Email is not verified');
-      }
+      console.log('User found:', { userId: user.USER_ID, hasPasswordHash: !!user.PASSWORD_HASH });
 
       const isMatch = await bcrypt.compare(password, user.PASSWORD_HASH);
       if (!isMatch) {
         return sendErrorResponse(res, 400, 'Invalid credentials');
       }
 
-      // Generate tokens with remember me option
+      // Generate tokens
       const { accessToken, refreshToken } = generateTokens(user, rememberMe);
+      console.log('Tokens generated:', { 
+        hasAccessToken: !!accessToken, 
+        hasRefreshToken: !!refreshToken 
+      });
 
-      // Store refresh token in database
+      // Store refresh token in database with explicit values
+      const insertTokenSql = `
+        INSERT INTO TRADE.GWTRADE.REFRESH_TOKENS 
+        (USER_ID, REFRESH_TOKEN, EXPIRES_AT, REMEMBER_ME)
+        VALUES (?, ?, DATEADD(day, ?, CURRENT_TIMESTAMP()), ?)
+      `;
+      
+      const tokenBinds = [
+        user.USER_ID,
+        refreshToken,
+        rememberMe ? 30 : 1,
+        rememberMe
+      ];
+
+      console.log('Storing refresh token:', {
+        sql: insertTokenSql,
+        binds: tokenBinds.map((value, index) => 
+          index === 1 ? value.substring(0, 10) + '...' : value
+        )
+      });
+
       await db.execute({
-        sqlText: `
-          INSERT INTO TRADE.GWTRADE.REFRESH_TOKENS 
-          (USER_ID, REFRESH_TOKEN, EXPIRES_AT, REMEMBER_ME)
-          VALUES (?, ?, DATEADD(day, ?, CURRENT_TIMESTAMP()), ?)
-        `,
-        binds: [
-          user.USER_ID, 
-          refreshToken,
-          rememberMe ? 30 : 1,  // 30 days or 1 day
-          rememberMe
-        ]
+        sqlText: insertTokenSql,
+        binds: tokenBinds
       });
 
       await logTokenOperation('stored', refreshToken, user.USER_ID);
 
-      // Send response to client
+      // Send response
       res.json({
         accessToken,
-        refreshToken,  // Include refresh token in response for mobile
+        refreshToken,
         user: {
           id: user.USER_ID,
           email: user.EMAIL,
           role: user.USER_TYPE || user.ROLE
         }
       });
+
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Login error details:', {
+        message: error.message,
+        code: error.code,
+        state: error.sqlState,
+        query: error?.sqlText,
+        binds: error?.binds
+      });
       res.status(500).json({ message: 'Login failed' });
     }
   }
