@@ -56,6 +56,15 @@ router.use('/forgot-password', authLimiter);
 router.use('/reset-password', authLimiter);
 router.use('/verify-email', authLimiter);
 
+// Add at the top of the file
+const logTokenOperation = async (operation, token, userId) => {
+  console.log(`Token ${operation}:`, {
+    userId,
+    tokenPreview: token.substring(0, 10) + '...',
+    timestamp: new Date().toISOString()
+  });
+};
+
 /**
  * @route   POST /auth/register
  * @desc    Register a new user and send verification email
@@ -405,47 +414,38 @@ router.post(
       }
 
       // Generate tokens with remember me option
-      const tokens = generateTokens(user, rememberMe);
+      const { accessToken, refreshToken } = generateTokens(user, rememberMe);
 
-      // For mobile app, send tokens in response body
-      const isMobileApp = req.headers['x-platform'] === 'mobile';
-      if (isMobileApp) {
-        return res.json({
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          user: {
-            id: user.USER_ID,
-            email: user.EMAIL,
-            role: user.ROLE,
-            username: user.USERNAME
-          }
-        });
-      }
-
-      // For web app, set refresh token in cookie
-      res.cookie('refreshToken', tokens.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000
+      // Store refresh token in database
+      await db.execute({
+        sqlText: `
+          INSERT INTO TRADE.GWTRADE.REFRESH_TOKENS 
+          (USER_ID, REFRESH_TOKEN, EXPIRES_AT, REMEMBER_ME)
+          VALUES (?, ?, DATEADD(day, ?, CURRENT_TIMESTAMP()), ?)
+        `,
+        binds: [
+          user.USER_ID, 
+          refreshToken,
+          rememberMe ? 30 : 1,  // 30 days or 1 day
+          rememberMe
+        ]
       });
 
+      await logTokenOperation('stored', refreshToken, user.USER_ID);
+
+      // Send response to client
       res.json({
-        accessToken: tokens.accessToken,
+        accessToken,
+        refreshToken,  // Include refresh token in response for mobile
         user: {
           id: user.USER_ID,
           email: user.EMAIL,
-          role: user.ROLE,
-          username: user.USERNAME
+          role: user.USER_TYPE || user.ROLE
         }
       });
     } catch (error) {
-      logger.error('Login error:', error);
-      const errorDetails = [{ msg: error.message }];
-      if (process.env.NODE_ENV === 'development') {
-        errorDetails.push({ stack: error.stack });
-      }
-      sendErrorResponse(res, 500, 'Server error', errorDetails);
+      console.error('Login error:', error);
+      res.status(500).json({ message: 'Login failed' });
     }
   }
 );
@@ -649,6 +649,8 @@ router.post('/refresh-token', refreshTokenLimiter, async (req, res) => {
         refreshToken
       ]
     });
+
+    await logTokenOperation('updated', tokens.refreshToken, userResult[0].USER_ID);
 
     if (isMobileApp) {
       return res.json({
