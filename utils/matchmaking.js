@@ -7,74 +7,63 @@ async function findMatches(userId, db) {
   }
   
   console.log('Finding matches for buyer:', userId);
-  
-  const query = `
+
+  const matchQuery = `
     WITH buyer AS (
-      SELECT DISTINCT
+      SELECT 
         USER_ID,
-        PRODUCT_INTERESTS,
-        LOCATION
+        PRODUCT_INTERESTS
       FROM trade.gwtrade.BUYERS
       WHERE USER_ID = ?
-      AND PRODUCT_INTERESTS IS NOT NULL
       AND ARRAY_SIZE(PRODUCT_INTERESTS) > 0
-      LIMIT 1
-    ),
-    seller_products AS (
-      SELECT 
-        s.USER_ID,
-        u.FULL_NAME,
-        ARRAY_AGG(s.PRODUCTS_OFFERED) as ALL_PRODUCTS,
-        s.LOCATION,
-        s.YEARS_OF_EXPERIENCE,
-        s.TARGET_MARKETS
-      FROM trade.gwtrade.SELLERS s
-      JOIN trade.gwtrade.USERS u ON s.USER_ID = u.USER_ID
-      WHERE s.PRODUCTS_OFFERED IS NOT NULL
-      GROUP BY s.USER_ID, u.FULL_NAME, s.LOCATION, s.YEARS_OF_EXPERIENCE, s.TARGET_MARKETS
     )
     SELECT DISTINCT
-      sp.USER_ID as SELLER_ID,
-      sp.FULL_NAME as COMPANY_NAME,
-      sp.ALL_PRODUCTS as PRODUCT_CATEGORIES,
-      sp.LOCATION,
-      sp.YEARS_OF_EXPERIENCE,
-      sp.TARGET_MARKETS,
+      s.USER_ID as SELLER_ID,
+      u.FULL_NAME as COMPANY_NAME,
+      s.PRODUCTS_OFFERED as PRODUCT_CATEGORIES,
+      s.LOCATION,
+      s.YEARS_OF_EXPERIENCE,
+      s.TARGET_MARKETS,
       b.PRODUCT_INTERESTS as BUYER_INTERESTS,
       ARRAY_INTERSECTION(
-        ARRAY_FLATTEN(sp.ALL_PRODUCTS),
+        s.PRODUCTS_OFFERED,
         b.PRODUCT_INTERESTS
       ) as MATCHING_PRODUCTS,
       ARRAY_SIZE(ARRAY_INTERSECTION(
-        ARRAY_FLATTEN(sp.ALL_PRODUCTS),
+        s.PRODUCTS_OFFERED,
         b.PRODUCT_INTERESTS
       )) as MATCH_COUNT
-    FROM seller_products sp
+    FROM trade.gwtrade.SELLERS s
+    JOIN trade.gwtrade.USERS u ON s.USER_ID = u.USER_ID
     CROSS JOIN buyer b
-    WHERE ARRAY_SIZE(ARRAY_INTERSECTION(
-      ARRAY_FLATTEN(sp.ALL_PRODUCTS),
+    WHERE s.PRODUCTS_OFFERED IS NOT NULL
+    AND ARRAY_SIZE(ARRAY_INTERSECTION(
+      s.PRODUCTS_OFFERED,
       b.PRODUCT_INTERESTS
-    )) > 0`;
+    )) > 0
+    ORDER BY MATCH_COUNT DESC`;
 
   try {
     console.log('Executing matchmaking query...');
     const result = await db.execute({ 
-      sqlText: query,
+      sqlText: matchQuery,
       binds: [userId]
     });
 
-    console.log('Raw query result:', JSON.stringify(result.rows, null, 2));
-    console.log('Number of rows returned:', result.rows?.length || 0);
+    // Access the raw result directly if rows is not available
+    const resultRows = Array.isArray(result) ? result : (result.rows || []);
+    
+    console.log('Result rows:', resultRows.length);
 
-    if (!result.rows || result.rows.length === 0) {
+    if (resultRows.length === 0) {
       console.log('No matches found, returning empty array');
       return { matches: [] };
     }
 
-    const matches = result.rows.map(seller => ({
+    const matches = resultRows.map(seller => ({
       SELLER_ID: seller.SELLER_ID,
       COMPANY_NAME: seller.COMPANY_NAME,
-      MATCH_SCORE: (seller.MATCH_COUNT / seller.BUYER_INTERESTS.length) * 100,
+      MATCH_SCORE: Math.round((seller.MATCH_COUNT / seller.BUYER_INTERESTS.length) * 100),
       PRODUCT_CATEGORIES: seller.PRODUCT_CATEGORIES,
       MATCHING_PRODUCTS: seller.MATCHING_PRODUCTS,
       YEARS_OF_EXPERIENCE: seller.YEARS_OF_EXPERIENCE || 0,
