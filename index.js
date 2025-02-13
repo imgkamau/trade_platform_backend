@@ -49,7 +49,7 @@ if (env !== 'production') {
 }
 const verifyCompanyRouter = require('./routes/verifyCompany');
 const activitiesRouter = require('./routes/activities');
-const testRouter = require('./routes/test');
+//const testRouter = require('./routes/test');
 const { setupWebSocket } = require('./services/socket');
 
 const app = express();
@@ -109,7 +109,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/products', productsRouter);
 app.use('/api', verifyCompanyRouter);
 app.use('/api', matchmakingRoutes);
-app.use('/test', testRouter);
+//app.use('/test', testRouter);
 app.use('/api', euRequirementsRouter);
 app.use('/api', sellersRouter);
 // Protected routes (with auth and subscription check)
