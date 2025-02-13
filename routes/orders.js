@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { verifyToken, verifyRole } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
-const redis = require('../config/redis');
+//const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 3600; // 1 hour
 const CONVERSATIONS_LIMIT = 50; // Example limit for recent activities

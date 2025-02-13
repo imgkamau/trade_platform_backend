@@ -4,7 +4,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Snowflake database module
 const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
-const redis = require('../config/redis');
+//const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 1800; // 30 minutes for analytics data
 
@@ -20,21 +20,13 @@ const clearSellerAnalyticsCache = async (sellerId) => {
   }
 };
 
-// Sales Overview Endpoint with caching
+// Sales Overview Endpoint
 router.get('/sales-overview', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
-  const cacheKey = `sales_overview_${sellerId}`;
   console.log(`Processing sales-overview for Seller ID: ${sellerId}`);
 
   try {
-    // Try to get from cache first
-    const cachedData = await redis.get(cacheKey);
-    if (cachedData) {
-      console.log('Serving sales overview from cache');
-      return res.json(JSON.parse(cachedData));
-    }
-
-    // If not in cache, calculate analytics
+    // Calculate analytics
     const totalRevenueResult = await db.execute({
       sqlText: `
         SELECT SUM(oi.PRICE * oi.QUANTITY) AS TOTAL_REVENUE
@@ -111,10 +103,6 @@ router.get('/sales-overview', verifyToken, verifyRole(['seller']), async (req, r
       salesGrowthPercentage,
     };
 
-    // Cache the results
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(analyticsData));
-    console.log('Analytics data cached for seller:', sellerId);
-
     res.json(analyticsData);
   } catch (error) {
     console.error('Error fetching sales overview:', error);
@@ -122,21 +110,12 @@ router.get('/sales-overview', verifyToken, verifyRole(['seller']), async (req, r
   }
 });
 
-// Product Performance Endpoint with caching
+// Product Performance Endpoint
 router.get('/product-performance', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
-  const cacheKey = `product_performance_${sellerId}`;
   console.log(`Processing product-performance for Seller ID: ${sellerId}`);
 
   try {
-    // Try cache first
-    const cachedData = await redis.get(cacheKey);
-    if (cachedData) {
-      console.log('Serving product performance from cache');
-      return res.json(JSON.parse(cachedData));
-    }
-
-    // If not in cache, fetch data
     const topSellingProductsResult = await db.execute({
       sqlText: `
         SELECT p.PRODUCT_ID, p.NAME, SUM(oi.QUANTITY) AS TOTAL_QUANTITY_SOLD
@@ -184,10 +163,6 @@ router.get('/product-performance', verifyToken, verifyRole(['seller']), async (r
       productCategoryDistribution,
     };
 
-    // Cache the results
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(performanceData));
-    console.log('Product performance data cached');
-
     res.json(performanceData);
   } catch (error) {
     console.error('Error fetching product performance:', error);
@@ -195,21 +170,12 @@ router.get('/product-performance', verifyToken, verifyRole(['seller']), async (r
   }
 });
 
-// Time-Based Analysis Endpoint with caching
+// Time-Based Analysis Endpoint
 router.get('/time-based-analysis', verifyToken, verifyRole(['seller']), async (req, res) => {
   const sellerId = req.user.id;
-  const cacheKey = `time_analysis_${sellerId}`;
   console.log(`Processing time-based-analysis for Seller ID: ${sellerId}`);
 
   try {
-    // Try cache first
-    const cachedData = await redis.get(cacheKey);
-    if (cachedData) {
-      console.log('Serving time analysis from cache');
-      return res.json(JSON.parse(cachedData));
-    }
-
-    // If not in cache, fetch data
     const dailySalesResult = await db.execute({
       sqlText: `
         SELECT
@@ -252,10 +218,6 @@ router.get('/time-based-analysis', verifyToken, verifyRole(['seller']), async (r
       dailySales,
       peakSalesHours,
     };
-
-    // Cache the results for a shorter time since it's time-sensitive data
-    await redis.setex(cacheKey, 900, JSON.stringify(timeAnalysisData)); // 15 minutes cache
-    console.log('Time analysis data cached');
 
     res.json(timeAnalysisData);
   } catch (error) {

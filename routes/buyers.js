@@ -3,34 +3,13 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verifyToken, verifyRole } = require('../middleware/auth');
-const redis = require('../config/redis');
-
-const CACHE_EXPIRATION = 3600; // 1 hour
-
-// Helper function to clear buyer cache
-const clearBuyerCache = async (userId) => {
-  try {
-    await redis.del(`buyer_profile_${userId}`);
-    console.log('Buyer cache cleared for:', userId);
-  } catch (error) {
-    console.error('Error clearing buyer cache:', error);
-  }
-};
 
 // GET: Retrieve the buyer's profile
 router.get('/profile', verifyToken, verifyRole(['buyer']), async (req, res) => {
   const buyerId = req.user.id;
-  const cacheKey = `buyer_profile_${buyerId}`;
 
   try {
-    // Try to get from cache first
-    const cachedProfile = await redis.get(cacheKey);
-    if (cachedProfile) {
-      console.log('Serving buyer profile from cache');
-      return res.json(JSON.parse(cachedProfile));
-    }
-
-    // Fetch buyer's profile from database
+    // Removed cache check - directly fetch from database
     const buyerResult = await db.execute({
       sqlText: `SELECT * FROM trade.gwtrade.BUYERS WHERE USER_ID = ?`,
       binds: [buyerId],
@@ -65,10 +44,7 @@ router.get('/profile', verifyToken, verifyRole(['buyer']), async (req, res) => {
       location: buyerProfile.LOCATION || '',
     };
 
-    // Cache the profile data
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(profileData));
-    console.log('Buyer profile cached for:', buyerId);
-
+    // Removed cache setting
     res.json({ profile: profileData });
   } catch (error) {
     console.error('Error fetching buyer profile:', error);
@@ -116,9 +92,7 @@ router.put('/profile', verifyToken, verifyRole(['buyer']), async (req, res) => {
       binds,
     });
 
-    // Clear the buyer's cache after update
-    await clearBuyerCache(buyerId);
-
+    // Removed cache clearing
     res.json({ message: 'Buyer profile updated successfully.' });
   } catch (error) {
     console.error('Error updating buyer profile:', error);

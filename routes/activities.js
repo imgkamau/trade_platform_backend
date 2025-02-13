@@ -5,7 +5,6 @@ const router = express.Router();
 const { verifyToken } = require('../middleware/auth');
 const db = require('../db');
 const logger = require('../utils/logger');
-const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 300; // 5 minutes for activities
 
@@ -21,17 +20,9 @@ const clearActivityCache = async (userId) => {
 
 router.get('/', verifyToken, async (req, res) => {
   const userId = req.user.id;
-  const cacheKey = `activities_${userId}`;
 
   try {
-    // Try to get from cache first
-    const cachedActivities = await redis.get(cacheKey);
-    if (cachedActivities) {
-      logger.info('Serving activities from cache for user:', userId);
-      return res.json(JSON.parse(cachedActivities));
-    }
-
-    // If not in cache, fetch from database
+    // Fetch directly from database
     const rows = await db.execute({
       sqlText: `
         SELECT 
@@ -47,10 +38,7 @@ router.get('/', verifyToken, async (req, res) => {
       binds: [userId],
     });
 
-    // Cache the results
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(rows));
-    logger.info('Activities cached for user:', userId);
-
+    logger.info('Activities fetched for user:', userId);
     res.json(rows);
   } catch (error) {
     logger.error('Error fetching activities:', error);

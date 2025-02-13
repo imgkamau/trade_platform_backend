@@ -3,19 +3,19 @@ const router = express.Router();
 const db = require('../db');
 const { verifyToken, verifyRole } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
-const redis = require('../config/redis');
+//const redis = require('../config/redis');
 
-const CACHE_EXPIRATION = 3600; // 1 hour
+//const CACHE_EXPIRATION = 3600; // 1 hour
 
 // Helper function to clear shipment cache
-const clearShipmentCache = async (trackingNumber) => {
+/*const clearShipmentCache = async (trackingNumber) => {
   try {
     await redis.del(`shipment_${trackingNumber}`);
     console.log('Shipment cache cleared for:', trackingNumber);
   } catch (error) {
     console.error('Error clearing shipment cache:', error);
   }
-};
+};*/
 
 // POST: Create a new shipment
 router.post('/shipments', verifyToken, verifyRole(['seller']), async (req, res) => {

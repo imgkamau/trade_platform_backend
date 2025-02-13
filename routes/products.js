@@ -6,7 +6,7 @@ const db = require('../db');
 const { body, validationResult } = require('express-validator');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid'); // Import the uuid module
-const redis = require('../config/redis');
+//const redis = require('../config/redis');
 const CACHE_EXPIRATION = 3600; // 1 hour in seconds
 const { verifyToken, verifyRole } = require('../middleware/auth'); // New auth middleware
 

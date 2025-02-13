@@ -8,7 +8,7 @@ const { verifyToken, verifyRole } = require('../middleware/auth'); // Only impor
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 const { sendQuoteRequestEmail, sendQuoteResponseEmail } = require('../utils/emailService'); // Import the SendGrid function
-const redis = require('../config/redis');
+//const redis = require('../config/redis');
 
 const CACHE_EXPIRATION = 3600; // 1 hour
 

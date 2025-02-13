@@ -1,20 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const redis = require('../config/redis');
 
 // Get requirements by product code or name
 router.get('/eu-requirements', async (req, res) => {
     const { product } = req.query;
-    const cacheKey = `eu_req_${product}`;
 
     try {
-        // Check cache first
-        const cachedData = await redis.get(cacheKey);
-        if (cachedData) {
-            return res.json(JSON.parse(cachedData));
-        }
-
         // Query database
         const result = await db.execute({
             sqlText: `
@@ -31,10 +23,6 @@ router.get('/eu-requirements', async (req, res) => {
         }
 
         const requirements = result[0];
-
-        // Cache the result
-        await redis.setex(cacheKey, 3600, JSON.stringify(requirements)); // Cache for 1 hour
-
         res.json(requirements);
     } catch (error) {
         console.error('Error fetching EU requirements:', error);
