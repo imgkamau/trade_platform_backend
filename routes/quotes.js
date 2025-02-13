@@ -8,25 +8,6 @@ const { verifyToken, verifyRole } = require('../middleware/auth'); // Only impor
 const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 const { sendQuoteRequestEmail, sendQuoteResponseEmail } = require('../utils/emailService'); // Import the SendGrid function
-//const redis = require('../config/redis');
-
-const CACHE_EXPIRATION = 3600; // 1 hour
-
-// Helper function to clear quote caches
-const clearQuoteCache = async (buyerId, sellerId, quoteId) => {
-  try {
-    // Clear specific quote cache
-    if (quoteId) {
-      await redis.del(`quote_${quoteId}`);
-    }
-    // Clear user quote lists
-    if (buyerId) await redis.del(`quotes_buyer_${buyerId}`);
-    if (sellerId) await redis.del(`quotes_seller_${sellerId}`);
-    console.log('Quote cache cleared');
-  } catch (error) {
-    logger.error('Error clearing quote cache:', error);
-  }
-};
 
 // POST /api/quotes - Request a new quote
 router.post('/', verifyToken, verifyRole(['buyer']), async (req, res) => {
@@ -118,10 +99,6 @@ router.post('/', verifyToken, verifyRole(['buyer']), async (req, res) => {
       });
     }
 
-    // Clear buyer's and seller's quote cache after creation
-    await clearQuoteCache(buyerId, sellerId);
-    
-    // Respond to buyer
     res.status(201).json({ message: 'Quote requested successfully.', quoteId });
   } catch (error) {
     logger.error(`Unexpected error in /api/quotes: ${error.message}`, error);
@@ -168,9 +145,6 @@ router.post('/:id/respond', verifyToken, verifyRole(['seller']), async (req, res
 
     // Log activity
     await logActivity(sellerId, `Responded to quote request ${id}`, 'quote');
-
-    // Clear caches using the stored quote details
-    await clearQuoteCache(quote.BUYER_ID, sellerId, id);
     
     res.status(200).json({ message: 'Quote response submitted successfully.' });
   } catch (error) {
@@ -185,21 +159,7 @@ router.get('/:id', verifyToken, verifyRole(['seller', 'buyer']), async (req, res
     const { id } = req.params;
     const userId = req.user.id;
     const role = req.user.role;
-    const cacheKey = `quote_${id}`;
 
-    // Try cache first
-    const cachedQuote = await redis.get(cacheKey);
-    if (cachedQuote) {
-      const quote = JSON.parse(cachedQuote);
-      // Verify user has permission to view this quote
-      if ((role === 'buyer' && quote.BUYER_ID === userId) || 
-          (role === 'seller' && quote.SELLER_ID === userId)) {
-        logger.info('Serving quote from cache');
-        return res.json(quote);
-      }
-    }
-
-    // If not in cache or no permission, query database
     let quote;
     if (role === 'seller') {
       quote = await db.execute({
@@ -230,10 +190,6 @@ router.get('/:id', verifyToken, verifyRole(['seller', 'buyer']), async (req, res
       return res.status(404).json({ message: 'Quote not found or unauthorized' });
     }
 
-    // Cache the quote
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(quote[0]));
-    logger.info(`Cached quote ${id}`);
-
     res.json(quote[0]);
   } catch (error) {
     logger.error(`Error fetching quote ID=${id}:`, error);
@@ -246,14 +202,6 @@ router.get('/', verifyToken, verifyRole(['seller', 'buyer']), async (req, res) =
   try {
     const userId = req.user.id;
     const role = req.user.role;
-    const cacheKey = `quotes_${role}_${userId}`;
-
-    // Try cache first
-    const cachedQuotes = await redis.get(cacheKey);
-    if (cachedQuotes) {
-      logger.info('Serving quotes from cache');
-      return res.json(JSON.parse(cachedQuotes));
-    }
 
     let quotes;
 
@@ -313,10 +261,6 @@ router.get('/', verifyToken, verifyRole(['seller', 'buyer']), async (req, res) =
     } else {
       return res.status(403).json({ message: 'Access denied.' });
     }
-
-    // Cache the results
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(quotes));
-    logger.info(`Cached quotes for ${role} ${userId}`);
 
     res.json(quotes);
   } catch (error) {

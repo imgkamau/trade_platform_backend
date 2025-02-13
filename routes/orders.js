@@ -9,27 +9,18 @@ const logger = require('../utils/logger');
 const logActivity = require('../utils/activityLogger');
 //const redis = require('../config/redis');
 
-const CACHE_EXPIRATION = 3600; // 1 hour
+//const CACHE_EXPIRATION = 3600; // 1 hour
 const CONVERSATIONS_LIMIT = 50; // Example limit for recent activities
 
 // Apply auth middleware to all routes
 router.use(verifyToken);
 
-// GET all orders with caching
+// GET all orders
 router.get('/', verifyRole(['seller', 'buyer']), async (req, res) => {
   const userId = req.user.id;
   const role = req.user.role;
-  const cacheKey = `orders_${role}_${userId}`;
 
   try {
-    // Try cache first
-    const cachedOrders = await redis.get(cacheKey);
-    if (cachedOrders) {
-      console.log('Serving orders from cache');
-      return res.json(JSON.parse(cachedOrders));
-    }
-
-    // If not in cache, fetch from database
     let orders;
     if (role === 'buyer') {
       orders = await db.execute({
@@ -81,10 +72,6 @@ router.get('/', verifyRole(['seller', 'buyer']), async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Cache the results
-    await redis.setex(cacheKey, CACHE_EXPIRATION, JSON.stringify(orders));
-    console.log(`Cached orders for ${role} ${userId}`);
-
     res.status(200).json(orders);
   } catch (error) {
     logger.error('Error fetching orders:', error);
@@ -92,25 +79,9 @@ router.get('/', verifyRole(['seller', 'buyer']), async (req, res) => {
   }
 });
 
-// Clear cache helper
-const clearOrderCache = async (buyerId, sellerIds) => {
-  try {
-    // Clear buyer's cache
-    await redis.del(`orders_buyer_${buyerId}`);
-    
-    // Clear sellers' cache
-    for (const sellerId of sellerIds) {
-      await redis.del(`orders_seller_${sellerId}`);
-    }
-    console.log('Order caches cleared');
-  } catch (error) {
-    console.error('Error clearing order cache:', error);
-  }
-};
-
 // Place a new order (Buyers only)
 router.post('/', verifyRole(['buyer']), async (req, res) => {
-  const { items } = req.body; // items is an array of { productName, quantity }
+  const { items } = req.body;
   const buyerId = req.user.id;
   const role = req.user.role;
 
@@ -129,14 +100,12 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
     // Begin transaction
     await db.execute({ sqlText: 'BEGIN', binds: [] });
 
-    // To collect unique seller-product pairs
     const sellerProductMap = new Map();
-    const sellersSet = new Set(); // To collect unique seller IDs
+    const sellersSet = new Set();
 
     for (const item of items) {
       const { productName, quantity } = item;
 
-      // Validate productName and quantity
       if (!productName || typeof productName !== 'string') {
         throw new Error('Invalid product name');
       }
@@ -144,7 +113,6 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
         throw new Error('Invalid quantity');
       }
 
-      // Fetch product details using product name
       const productResult = await db.execute({
         sqlText: `SELECT * FROM trade.gwtrade.PRODUCTS WHERE NAME = ?`,
         binds: [productName],
@@ -154,7 +122,6 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
         throw new Error(`Product with name "${productName}" not found`);
       }
 
-      // Handle multiple products with the same name
       if (productResult.length > 1) {
         throw new Error(
           `Multiple products found with name "${productName}". Please specify further.`
@@ -172,13 +139,11 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
       const itemTotal = product.PRICE * quantity;
       totalAmount += itemTotal;
 
-      // Update product stock
       await db.execute({
         sqlText: `UPDATE trade.gwtrade.PRODUCTS SET STOCK = STOCK - ? WHERE PRODUCT_ID = ?`,
         binds: [quantity, productId],
       });
 
-      // Insert order item
       const ORDER_ITEM_ID = uuidv4();
 
       await db.execute({
@@ -195,15 +160,13 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
         binds: [ORDER_ITEM_ID, ORDER_ID, productId, productName, quantity, product.PRICE],
       });
 
-      // Collect seller-product pair for conversation creation
       const key = `${sellerId}-${productId}`;
       if (!sellerProductMap.has(key)) {
         sellerProductMap.set(key, { sellerId, productId });
-        sellersSet.add(sellerId); // Add to sellers set
+        sellersSet.add(sellerId);
       }
     }
 
-    // Create order
     await db.execute({
       sqlText: `
         INSERT INTO trade.gwtrade.ORDERS (
@@ -217,9 +180,7 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
       binds: [ORDER_ID, buyerId, totalAmount],
     });
 
-    // Automatically create conversations between buyer and each seller for the products
     for (const [key, { sellerId, productId }] of sellerProductMap.entries()) {
-      // Check if a conversation already exists
       const existingConversation = await db.execute({
         sqlText: `
           SELECT CONVERSATION_ID FROM trade.gwtrade.CONVERSATIONS
@@ -230,10 +191,9 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
       });
 
       if (existingConversation && existingConversation.length > 0) {
-        continue; // Skip creating a new conversation
+        continue;
       }
 
-      // Create new conversation
       const conversationId = uuidv4();
       await db.execute({
         sqlText: `
@@ -244,22 +204,15 @@ router.post('/', verifyRole(['buyer']), async (req, res) => {
       });
     }
 
-    // Commit transaction
     await db.execute({ sqlText: 'COMMIT', binds: [] });
 
-    // Log activities for each unique seller
     for (const sellerId of sellersSet) {
       await logActivity(sellerId, 'New order received', 'order');
     }
 
-    // After successful order creation, clear caches
-    await clearOrderCache(buyerId, Array.from(sellersSet));
-    
-    // Send response to the client
     res.status(201).json({ message: 'Order placed successfully', orderId: ORDER_ID });
   } catch (error) {
     console.error('Error placing order:', error);
-    // Rollback transaction
     await db.execute({ sqlText: 'ROLLBACK', binds: [] });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
